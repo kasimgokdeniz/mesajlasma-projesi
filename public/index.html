@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mesajlaşma | Başlangıç</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="page-header">
+    <div><p class="eyebrow">WEB TABANLI MESAJLAŞMA</p><h1>Birlikte konuşmanın başlangıcı.</h1></div>
+    <span class="badge">Aşama 1 / 5 · Arayüz iskeleti</span>
+  </header>
+  <main>
+    <p class="notice">Bu sürüm bir başlangıç iskeletidir. Hesap oluşturulmaz, oturum açılmaz ve mesaj gönderilmez. Şifreleme henüz uygulanmadı.</p>
+    <section class="connection" aria-labelledby="connection-title">
+      <div><h2 id="connection-title">Sunucu durumu</h2><p id="connection-status" role="status" aria-live="polite">Yükleniyor: sunucu kontrol ediliyor…</p></div>
+      <button id="retry" type="button">Yeniden kontrol et</button>
+    </section>
+    <p id="error-message" class="error" role="alert" hidden></p>
+    <div class="workspace">
+      <section class="panel" aria-labelledby="account-title">
+        <p class="eyebrow">01 / HESAP</p><h2 id="account-title">Giriş ve kayıt</h2>
+        <p id="account-note" class="muted">Hesap işlemleri sonraki aşamada açılacak. Şimdilik bilgi giremezsiniz.</p>
+        <form aria-describedby="account-note">
+          <fieldset disabled>
+            <legend>Hesap bilgileri</legend>
+            <label for="username">Kullanıcı adı</label><input id="username" name="username" autocomplete="username" placeholder="Kullanıcı adınız">
+            <label for="password">Parola</label><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Henüz kullanılamıyor">
+            <div class="actions"><button type="button">Giriş yap</button><button type="button" class="secondary">Kayıt ol</button></div>
+          </fieldset>
+        </form>
+      </section>
+      <section class="panel" aria-labelledby="users-title">
+        <p class="eyebrow">02 / KİŞİLER</p><h2 id="users-title">Kullanıcı listesi</h2>
+        <p class="count">0 kullanıcı · Örnek görünüm</p>
+        <div class="empty"><span class="empty-symbol" aria-hidden="true">○</span><h3>Henüz kimse yok</h3><p>Kullanıcı listesi, hesap işlemleri eklendiğinde burada görünecek.</p></div>
+        <button type="button" class="secondary full" disabled>Grup oluştur · Henüz kullanılamıyor</button>
+      </section>
+      <section class="panel chat" aria-labelledby="chat-title">
+        <p class="eyebrow">03 / SOHBET</p><h2 id="chat-title">Sohbet alanı</h2>
+        <p class="muted">Sohbet bağlantısı yok · Anlık mesajlaşma henüz uygulanmadı.</p>
+        <div class="empty chat-empty"><span class="empty-symbol" aria-hidden="true">…</span><h3>İlk sohbetinize yer açtık</h3><p>Özel ve grup sohbetleri sonraki aşamalarda burada yer alacak.</p></div>
+        <label for="message">Mesaj</label><textarea id="message" rows="2" disabled placeholder="Mesajlaşma henüz kullanılamıyor"></textarea>
+        <button type="button" disabled>Gönder</button>
+      </section>
+    </div>
+  </main>
+  <footer>Proje temeli · HTML, CSS, JavaScript ve Express</footer>
+</body>
+</html>
