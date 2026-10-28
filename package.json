@@ -2,7 +2,7 @@
   "name": "mesajlasma-projesi",
   "version": "0.1.0",
   "private": true,
-  "description": "Web tabanlı mesajlaşma uygulaması — aşama 1",
+  "description": "Web tabanlı mesajlaşma uygulaması — aşama 2",
   "type": "module",
   "engines": {
     "node": ">=22.9"
@@ -10,9 +10,14 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "node --env-file-if-exists=.env --watch server/index.js",
-    "test": "node --test"
+    "test": "node --env-file-if-exists=.env --test",
+    "migrate": "node --env-file-if-exists=.env server/migrate.js",
+    "migrate:test": "node --env-file-if-exists=.env server/migrate.js --test"
   },
   "dependencies": {
-    "express": "^5.3.0"
+    "connect-pg-simple": "^10.0.0",
+    "express": "^5.3.0",
+    "express-session": "^1.19.0",
+    "pg": "^8.23.1"
   }
 }

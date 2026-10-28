@@ -20,7 +20,7 @@ test('Sunucu HTTP üzerinden ana sayfa, varlıklar ve durum yanıtı sunar', asy
   }
   const health = await fetch(`${base}/api/health`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: 'ok', stage: 1 });
+  assert.deepEqual(await health.json(), { status: 'ok', stage: 2 });
   for (const path of ['/missing', '/.env', '/server/app.js', '/package.json']) {
     const response = await fetch(`${base}${path}`);
     assert.equal(response.status, 404);

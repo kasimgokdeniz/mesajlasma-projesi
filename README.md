@@ -1,74 +1,72 @@
-# Web Tabanlı Anlık Mesajlaşma Uygulaması
+﻿# Web Tabanlı Anlık Mesajlaşma Uygulaması
 
-Bu depo, Gereksinim-Analizi-Raporu.docx temelinde geliştirilmektedir. İlk aşamada hazırlanan bileşenler: Express sunucusu, masaüstü arayüz iskeleti ve geliştirme ortamı.
+Mevcut üç sütunlu arayüz korunarak kayıt, giriş, çıkış, oturum kontrolü ve kullanıcı listesi PostgreSQL API'lerine bağlandı.
 
-## Ön koşullar
+## Kurulum ve başlatma
 
-- Node.js 22.9 veya üstü (24 LTS önerilir); npm Node.js ile gelir.
-- Windows PowerShell ve güncel Chrome veya Edge.
-- Bu aşamada PostgreSQL kurulumu gerekmez.
-
-## Kurulum ve çalıştırma
-
-Proje klasöründe PowerShell açın:
+Node.js 22.9+, npm, PostgreSQL ve Chrome/Edge gerekir. PowerShell yürütme politikasını değiştirmeyin.
 
 ```powershell
 npm.cmd ci
+# Yalnızca .env yoksa:
 Copy-Item .env.example .env
+```
+
+Mevcut `.env` üzerine kopyalamayın. Yerel dosyada PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, TEST_PGDATABASE ve en az 32 karakterlik güvenli rastgele SESSION_SECRET bulunmalıdır. Bu çalışmada eksik oturum sırrı güvenli rastgele üretilip değeri gösterilmeden yerel dosyaya eklendi. Sırları Git'e eklemeyin.
+
+Veritabanları `mesajlasma` ve `mesajlasma_test`, kullanıcı `mesajlasma_app` olarak zaten hazırdır. Migration veritabanı oluşturmaz, süper kullanıcı yetkisi istemez. Başka kurulumda PostgreSQL yöneticisi iki veritabanını oluşturmalı; uygulama kullanıcısına CONNECT, hedef şemada USAGE/CREATE yetkileri vermelidir.
+
+```powershell
+npm.cmd run migrate
+npm.cmd run migrate:test
+npm.cmd test
 npm.cmd run dev
 ```
 
-`.env` mevcutsa kopyalama adımını atlayın; kendi ayarlarınızı koruyun. Tarayıcıda http://127.0.0.1:3000 adresini açın. Geliştirme komutu sunucu dosyası değişince yeniden başlar; HTML/CSS/JS değişince tarayıcıyı yenileyin. Durdurmak için Ctrl+C kullanın.
+http://127.0.0.1:3000 adresini açın. İzlemesiz başlatma: `npm.cmd start`. Durdurma: Ctrl+C. HOST varsayılanı 127.0.0.1, PORT varsayılanı 3000. Ortam ayarları değişince yeniden başlatın.
 
-Dosya izleme olmadan başlatma:
+PostgreSQL kapalıyken de geçerli ortam değişkenleri ve oturum sırrıyla HTTP sunucusu ve arayüz açılır. Hesap API'leri genel hata verir; bellek içi sahte hesaba geçilmez. PostgreSQL'i başlatın, migration çalıştırın ve yeniden deneyin. Sağlık API'si yalnızca HTTP erişimini gösterir.
 
-```powershell
-npm.cmd start
-```
+## API ve güvenlik
 
-`HOST` varsayılanı `127.0.0.1`, `PORT` varsayılanı `3000` değeridir. Port doluysa `.env` içindeki PORT değerini değiştirin. Yapılandırma değişince sunucuyu yeniden başlatın. `.env` Git tarafından dışlanır; gerçek sırları `.env.example` içine yazmayın.
+| Uç nokta | İşlev |
+| --- | --- |
+| GET /api/health | HTTP durumu; stage: 2, veritabanını kontrol etmez |
+| POST /api/auth/register | JSON username/password; kayıt ve oturum |
+| POST /api/auth/login | JSON username/password; doğrulama ve yeni oturum kimliği |
+| POST /api/auth/logout | JSON {}; oturumu siler, çerezi temizler |
+| GET /api/auth/me | Oturum sahibinin id/username alanları |
+| GET /api/users | Oturum gerekli; diğer hesapların yalnızca id/username alanları |
 
-## Testler
+Kullanıcı adı 3–32 ASCII harf/rakam/alt çizgi; küçük harfe dönüştürülerek benzersiz tutulur. Parola 12–128 karakterdir. Rastgele tuzlu scrypt (N=32768, r=8, p=3) kullanılır. SQL girdileri parametrelidir. İstemci kullanıcı adlarını textContent ile gösterir. JSON gövdesi 8 KB ile sınırlı; çapraz kaynaklı yazma istekleri reddedilir. Hatalarda bağlantı bilgisi veya sır gösterilmez.
 
-```powershell
-npm.cmd test
-```
+Oturumlar PostgreSQL sessions tablosunda kalıcıdır. Çerez HttpOnly, SameSite=Lax ve 8 saat ömürlüdür. Kayıt/giriş kimliği yeniler, çıkış eski oturumu iptal eder. Yerelde NODE_ENV=development HTTP içindir. Üretimde NODE_ENV=production Secure çerezi etkinleştirir: HTTPS sonlandıran tek güvenilir ters vekil arkasında çalıştırın (trust proxy=1); uygulama portuna doğrudan dış erişimi kapatın. SESSION_SECRET değişikliği mevcut oturumları geçersiz kılar. Giriş deneme sınırlaması ve kapsamlı güvenlik denetimi henüz yoktur; bu sürüm internete açık üretim dağıtımı değildir.
 
-Node.js yerleşik test aracı geçici bir yerel HTTP portunda sunucuyu başlatır. Ana sayfa, CSS/JS, durum API'si, güvenlik başlığı, 404 yanıtı ve özel dosyaların sunulmaması kontrol edilir. Test sonrası sunucu kapatılır. Ayrı test bağımlılığı yoktur. Bu sade projede derleme veya lint komutu bulunmaz.
+## Şema ve dosyalar
 
-Manuel Chrome ve Edge kontrolü:
+migrations/001_accounts.sql işlem içinde sürüm kaydı ve kilitle bir kez uygulanır; tekrar çalıştırılabilir. Mevcut veritabanlarını silmez. users, sessions ve schema_migrations kullanılır. Raporun conversations, conversation_members, messages, user_public_keys, key_envelopes, writing_profiles tabloları ilişkiler/indekslerle hazırdır; bu aşamada bunlara kullanıcı API'si sunulmaz. Şifreli paket biçimleri sonraki aşamalarda kesinleşecektir; şema E2EE uygulandığı anlamına gelmez.
 
-1. Sunucuyu başlatıp ana sayfayı açın. Hesap, kullanıcı listesi ve sohbet alanlarının okunabildiğini kontrol edin.
-2. Giriş/kayıt, grup oluşturma ve mesaj gönderme kontrollerinin devre dışı olduğunu doğrulayın.
-3. Sunucu durumunun yükleniyor durumundan erişilebilir durumuna geçtiğini görün.
-4. Sunucuyu durdurun, açık sayfadaki Yeniden kontrol et düğmesine basın. Bağlantı yok ve hata alanı görünmelidir (en geç yaklaşık 5 saniyede).
-5. Sunucuyu yeniden başlatıp Yeniden kontrol et düğmesine basın; hata alanı kapanmalıdır.
+- public/: korunmuş HTML/CSS ve hesap API istemcisi.
+- server/app.js, index.js: HTTP ve oturum yapılandırması.
+- server/db.js, migrate.js: bağlantı ve migration.
+- server/accounts.js, passwords.js, access.js: hesaplar, parola özeti ve ortak erişim/sohbet üyeliği yardımcısı.
+- test/: gerçek HTTP ve PostgreSQL kontrolleri.
 
-## Klasör yapısı
+Express HTTP sunumu sağlar. pg PostgreSQL bağlantısı; express-session oturum/çerez yaşam döngüsü; connect-pg-simple PostgreSQL oturum deposu için gereklidir. Kriptografi, ortam yükleme ve test aracı Node.js içinde yerleşiktir. .env Git tarafından dışlanır; gerçek sırları, özel anahtarları veya dump dosyalarını eklemeyin.
 
-```text
-public/
-  index.html       Giriş/kayıt, kullanıcı listesi ve sohbet yer tutucuları
-  styles.css       Masaüstü ağırlıklı, dar ekranlara uyarlanan görünüm
-  app.js           Gerçek sunucu erişilebilirlik kontrolü ve hata durumu
-server/
-  app.js           Express uygulaması, statik dosyalar, sağlık kontrolü
-  index.js         Ortam yapılandırması ve sunucunun başlatılması
-test/
-  server.test.js   Gerçek HTTP istekleriyle entegrasyon kontrolü
-.env.example       Sır içermeyen örnek yapılandırma
-```
+## Testler ve sınırlar
 
-`GET /api/health`, `{ "status": "ok", "stage": 1 }` döndürür. Bu yanıt yalnızca HTTP sunucusunun erişilebilirliğini gösterir; sohbet bağlantısı veya kullanıcı oturumu anlamına gelmez. Yalnızca `public/` klasörü statik olarak sunulur.
+`npm.cmd test` yalnızca TEST_PGDATABASE üzerinden gerçek PostgreSQL'e bağlanır. Değer eksikse veya PGDATABASE ile aynıysa başarısız olur; uygulama veritabanına düşmez. Bu hedef yalnızca test için ayrılmalıdır. Testler rastgele hesaplar oluşturur, yalnızca kendi kayıtlarını kimlikleriyle temizler; TRUNCATE/veritabanı oluşturma yoktur.
 
-## Bağımlılık ve kapsam sınırları
+Migration tekrarı, tablolar, kayıt/benzersizlik, parola özeti, yanlış/doğru giriş, çıkış iptali, çerez bayrakları, oturumsuz erişim, güvenli liste alanları, hatalı girdi/JSON, çapraz kaynak ve üyelik yardımcısı test edilir. Ana sayfa, varlıklar ve özel dosyaların sunulmaması da denetlenir. Build/lint komutu yoktur.
 
-Express, başlangıç HTTP sunucusunu ve statik dosya sunumunu sağlar; tek doğrudan bağımlılıktır. Ortam dosyası yükleme, geliştirme izleme ve testler Node.js'in yerleşik özelliklerini kullanır. package-lock.json tekrar üretilebilir kurulum için depoya eklenir.
+Gerçek çalıştırmada her iki migration başarılı; 7 test geçti, 0 başarısız. body-parser güvenlik güncellemesi sonrası npm denetimi 0 açık bildirdi. Chrome/Edge görsel/etkileşimli ve üç fiziksel bilgisayar kontrolleri çalıştırılmadı; manuel test gerekir:
 
-Gerçek kayıt/giriş/çıkış, parola saklama, oturum, PostgreSQL, Socket.IO, özel/grup mesajlaşması, yazıyor göstergesi, mesaj geçmişi, E2EE ve yazım analizi **uygulanmadı**. Hiçbir form veri göndermez veya saklamaz. Kullanıcı listesi boş bir yer tutucudur. Arayüzdeki sunucu durumu kontrolü gerçek HTTP kontrolüdür; anlık sohbet bağlantısı değildir. Şifreleme veya güvenli mesajlaşma iddiası yoktur. Sonraki aşamalara geçilmemiştir.
+1. Kayıt olun; aynı adla tekrar kayıt reddedilmeli.
+2. Çıkış yapıp yanlış, sonra doğru parolayla giriş yapın. Sayfa yenilenince oturum korunmalı.
+3. Başka tarayıcıda ikinci hesap oluşturup listeyi yenileyin. Oturumsuzken liste görünmemeli.
+4. PostgreSQL/HTTP sunucusunu durdurup hata ve yeniden deneme durumlarını kontrol edin.
 
-## Yerel ağda yalnızca arayüz kontrolü
+LAN için HOST=0.0.0.0 ayarlayın; ipconfig ile bulunan sunucu IPv4 adresini diğer bilgisayarlarda açın. Güvenlik duvarı iznini özel ağla sınırlayın. Yerel HTTP parolaları ağda şifrelemez; yalnızca güvenilen test ağında deneme hesapları kullanın. Üretimde HTTPS gerekir.
 
-İlk tam kabul testi aynı ağda üç bilgisayarda yapılacaktır; bu aşamada hesap ve mesajlaşma kabul testi yapılamaz. Arayüzü başka bilgisayardan görmek için `.env` içinde `HOST=0.0.0.0` ayarlayıp sunucuyu yeniden başlatın. Sunucunun yerel IPv4 adresini `ipconfig` ile bulun ve diğer bilgisayarlarda `http://SUNUCU_YEREL_IP:3000` adresini açın. Gerekirse Windows Güvenlik Duvarında yalnızca özel ağ için ilgili porta izin verin. `0.0.0.0` tarayıcı hedef adresi değildir.
-
-Bu HTTP geliştirme sunucusudur; internete açık üretim servisi olarak kullanılmamalıdır. HTTPS ve rapordaki güvenlik özellikleri sonraki aşamaların konusudur. Fiziksel üç bilgisayar, Chrome/Edge görsel kontrolleri ve etkileşimli ağ kesintisi senaryoları manuel doğrulama gerektirir; otomatik HTTP testleri bunların yapıldığı anlamına gelmez.
+Socket.IO, özel/grup sohbet işlemleri, yazıyor göstergesi, geçmiş, E2EE ve yazar analizi uygulanmadı. Sohbet ve grup kontrolleri devre dışıdır. Sonraki aşamalara geçilmedi.

@@ -1,5 +1,6 @@
 :root { color-scheme: light; font-family: "Segoe UI", Arial, sans-serif; color: #172b36; background: #f2f5f5; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; }
 .page-header, main, footer { max-width: 1440px; margin: auto; padding: 28px 36px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-top: 44px; }
