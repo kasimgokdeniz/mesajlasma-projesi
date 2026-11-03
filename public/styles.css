@@ -38,3 +38,11 @@ button:focus-visible { outline: 3px solid #b27b17; outline-offset: 3px; }
 footer { color: #53676e; font-size: 12px; padding-top: 8px; }
 @media (max-width: 1050px) { .workspace { grid-template-columns: 1fr 1fr; } .chat { grid-column: 1 / -1; } }
 @media (max-width: 650px) { .page-header { align-items: flex-start; flex-direction: column; } .workspace { grid-template-columns: 1fr; } .page-header, main, footer { padding-left: 18px; padding-right: 18px; } .connection { align-items: flex-start; } }
+
+#messages { max-height: 420px; overflow-y: auto; overflow-wrap: anywhere; }
+#messages article { border-bottom: 1px solid #dce3e8; padding: 12px 0; }
+#messages p { white-space: pre-wrap; }
+#group-members { max-height: 180px; overflow-y: auto; }
+#group-members input { width: auto; margin-right: 8px; }
+#conversation-list, #user-list { list-style: none; padding-left: 0; }
+#conversation-list button, #user-list button { margin-bottom: 6px; }

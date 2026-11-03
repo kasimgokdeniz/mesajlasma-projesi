@@ -25,6 +25,7 @@ async function api(path, body) {
 function showError(message) { error.textContent = message; error.hidden = false; }
 function showAccount(user) {
   currentUser = user;
+  window.dispatchEvent(new CustomEvent("account-change", { detail: user }));
   form.hidden = Boolean(user);
   logout.hidden = !user;
   refresh.hidden = !user;
@@ -40,10 +41,14 @@ async function loadUsers() {
     const data = await api('/users');
     list.replaceChildren(...data.users.map(user => {
       const item = document.createElement('li');
-      item.textContent = user.username;
+      const button = document.createElement("button");
+      button.type = "button"; button.textContent = user.username;
+      button.onclick = () => window.dispatchEvent(new CustomEvent("open-private", { detail: user }));
+      item.append(button);
       return item;
     }));
     count.textContent = `${data.users.length} diğer kullanıcı`;
+    window.dispatchEvent(new CustomEvent('users-loaded', { detail: data.users }));
     empty.hidden = data.users.length > 0;
     if (!data.users.length) empty.querySelector('p').textContent = 'Henüz başka kayıtlı kullanıcı yok.';
   } catch (err) { count.textContent = 'Liste alınamadı'; showError(err.message); }
@@ -55,8 +60,8 @@ async function checkServer() {
   status.textContent = 'Yükleniyor: sunucu kontrol ediliyor…';
   try {
     const health = await api('/health');
-    if (health.status !== 'ok' || health.stage !== 2) throw new Error('Beklenmeyen sunucu yanıtı.');
-    status.textContent = 'Sunucu erişilebilir · Mesajlaşma henüz etkin değil.';
+    if (health.status !== 'ok' || health.stage !== 3) throw new Error('Beklenmeyen sunucu yanıtı.');
+    status.textContent = 'Sunucu eri\u015filebilir.';
     try {
       const data = await api('/auth/me');
       showAccount(data.user);

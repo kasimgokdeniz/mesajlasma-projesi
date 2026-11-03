@@ -2,6 +2,7 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
+import { chatRoutes } from './chat.js';
 import { accountRoutes } from './accounts.js';
 
 export function createApp({ pool, secret = process.env.SESSION_SECRET } = {}) {
@@ -16,7 +17,7 @@ export function createApp({ pool, secret = process.env.SESSION_SECRET } = {}) {
     next();
   });
   app.get('/api/health', (_req, res) => {
-    res.set('Cache-Control', 'no-store').json({ status: 'ok', stage: 2 });
+    res.set('Cache-Control', 'no-store').json({ status: 'ok', stage: 3 });
   });
   if (pool) {
     if (!secret || secret.length < 32) throw new Error('SESSION_SECRET en az 32 karakter olmalı.');
@@ -35,12 +36,15 @@ export function createApp({ pool, secret = process.env.SESSION_SECRET } = {}) {
     });
     app.use(express.json({ limit: '8kb' }));
     const Store = connectPgSimple(session);
-    app.use(session({
+    const sessionMiddleware = session({
       name: 'messaging.sid', secret, resave: false, saveUninitialized: false,
       store: new Store({ pool, tableName: 'sessions', createTableIfMissing: false, errorLog: () => {} }),
       cookie: { httpOnly: true, sameSite: 'lax', secure: production, maxAge: 8 * 60 * 60 * 1000 },
-    }));
+    });
+    app.locals.sessionMiddleware = sessionMiddleware;
+    app.use(sessionMiddleware);
     app.use('/api', accountRoutes(pool));
+    app.use('/api', chatRoutes(pool));
   }
   app.use(express.static(fileURLToPath(new URL('../public/', import.meta.url))));
   app.use((_req, res) => res.status(404).json({ error: 'Kaynak bulunamadı.' }));

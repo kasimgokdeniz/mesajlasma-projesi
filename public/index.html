@@ -5,15 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mesajlaşma | Başlangıç</title>
   <link rel="stylesheet" href="/styles.css">
+  <script src="/socket.io/socket.io.js" defer></script>
   <script src="/app.js" defer></script>
+  <script src="/chat.js" defer></script>
 </head>
 <body>
   <header class="page-header">
     <div><p class="eyebrow">WEB TABANLI MESAJLAŞMA</p><h1>Birlikte konuşmanın başlangıcı.</h1></div>
-    <span class="badge">Aşama 2 / 5 · Hesaplar</span>
+    <span class="badge">A&#351;ama 3 / 5 &middot; Sohbet</span>
   </header>
   <main>
-    <p class="notice">Kayıt, giriş ve kullanıcı listesi kullanılabilir. Mesajlaşma ve şifreleme henüz uygulanmadı.</p>
+    <p class="notice">Yaln&#305;zca yerel geli&#351;tirme testi: mesajlar a&#231;&#305;k metin ile iletilir ve saklan&#305;r; sunucu okuyabilir. &#350;ifreleme yoktur.</p>
     <section class="connection" aria-labelledby="connection-title">
       <div><h2 id="connection-title">Sunucu durumu</h2><p id="connection-status" role="status" aria-live="polite">Yükleniyor: sunucu kontrol ediliyor…</p></div>
       <button id="retry" type="button">Yeniden kontrol et</button>
@@ -36,14 +38,13 @@
         <p class="eyebrow">02 / KİŞİLER</p><h2 id="users-title">Kullanıcı listesi</h2>
         <p class="count" id="user-count">Giriş gerekli</p><ul id="user-list"></ul><button id="refresh-users" type="button" hidden>Listeyi yenile</button>
         <div class="empty" id="users-empty"><span class="empty-symbol" aria-hidden="true">○</span><h3>Kullanıcı listesi</h3><p>Kullanıcıları görmek için giriş yapın.</p></div>
-        <button type="button" class="secondary full" disabled>Grup oluştur · Henüz kullanılamıyor</button>
+        <form id="group-form" hidden><label for="group-name">Grup ad&#305;</label><input id="group-name" maxlength="100" required><div id="group-members"></div><button>Grup olu&#351;tur</button><p class="muted">En az iki ba&#351;ka kullan&#305;c&#305; se&#231;in.</p></form><h3>Sohbetler</h3><button id="refresh-chats" type="button" hidden>Sohbetleri yenile</button><ul id="conversation-list"></ul>
       </section>
       <section class="panel chat" aria-labelledby="chat-title">
         <p class="eyebrow">03 / SOHBET</p><h2 id="chat-title">Sohbet alanı</h2>
-        <p class="muted">Sohbet bağlantısı yok · Anlık mesajlaşma henüz uygulanmadı.</p>
-        <div class="empty chat-empty"><span class="empty-symbol" aria-hidden="true">…</span><h3>İlk sohbetinize yer açtık</h3><p>Özel ve grup sohbetleri sonraki aşamalarda burada yer alacak.</p></div>
-        <label for="message">Mesaj</label><textarea id="message" rows="2" disabled placeholder="Mesajlaşma henüz kullanılamıyor"></textarea>
-        <button type="button" disabled>Gönder</button>
+        <p id="chat-state" role="status">Sohbet se&#231;in.</p>
+        <button id="older" type="button" hidden>&#214;nceki mesajlar</button><div id="messages" aria-live="polite"></div><p id="typing" role="status"></p>
+        <form id="message-form"><label for="message">Mesaj</label><textarea id="message" rows="2" maxlength="1000" required disabled></textarea><button id="send" disabled>G&#246;nder</button></form>
       </section>
     </div>
   </main>
