@@ -4,7 +4,7 @@ import { createApp } from './app.js';
 import { member, saveMessage, ChatError } from './chat.js';
 export function createChatServer(options) {
  const app = createApp(options), server = createServer(app);
- const io = new Server(server, { maxHttpBufferSize: 8192, allowRequest: (req,done) => { const origin=req.headers.origin; done(null,!origin || origin === `${req.socket.encrypted ? 'https' : 'http'}://${req.headers.host}`); } });
+ const io = new Server(server, { maxHttpBufferSize: 65536, allowRequest: (req,done) => { const origin=req.headers.origin; done(null,!origin || origin === `${req.socket.encrypted || (process.env.NODE_ENV === 'production' && req.headers['x-forwarded-proto'] === 'https') ? 'https' : 'http'}://${req.headers.host}`); } });
  io.engine.use(app.locals.sessionMiddleware);
  const authenticate = async socket => {
   await new Promise((resolve,reject) => socket.request.session.reload(e => e ? reject(new ChatError('Oturum geçersiz.',401)) : resolve()));

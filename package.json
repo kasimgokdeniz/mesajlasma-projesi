@@ -2,7 +2,7 @@
   "name": "mesajlasma-projesi",
   "version": "0.1.0",
   "private": true,
-  "description": "Web tabanlı mesajlaşma uygulaması — aşama 3",
+  "description": "Web tabanlı mesajlaşma uygulaması — aşama 4",
   "type": "module",
   "engines": {
     "node": ">=22.9"

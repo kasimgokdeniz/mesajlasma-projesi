@@ -10,7 +10,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
 const pool = createPool();
 const { server, io } = createChatServer({ pool });
 server.listen(port, host, () => {
-  console.log(`Uygulama hazır: http://${host}:${port} (aşama 3)`);
+  console.log(`Uygulama hazır: http://${host}:${port} (aşama 4)`);
 });
 server.on('error', () => {
   console.error('Sunucu başlatılamadı. HOST, PORT ve port kullanımını kontrol edin.');

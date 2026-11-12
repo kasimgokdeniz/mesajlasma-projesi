@@ -17,7 +17,7 @@ export function createApp({ pool, secret = process.env.SESSION_SECRET } = {}) {
     next();
   });
   app.get('/api/health', (_req, res) => {
-    res.set('Cache-Control', 'no-store').json({ status: 'ok', stage: 3 });
+    res.set('Cache-Control', 'no-store').json({ status: 'ok', stage: 4 });
   });
   if (pool) {
     if (!secret || secret.length < 32) throw new Error('SESSION_SECRET en az 32 karakter olmalı.');
@@ -34,7 +34,7 @@ export function createApp({ pool, secret = process.env.SESSION_SECRET } = {}) {
       }
       next();
     });
-    app.use(express.json({ limit: '8kb' }));
+    app.use(express.json({ limit: '64kb' }));
     const Store = connectPgSimple(session);
     const sessionMiddleware = session({
       name: 'messaging.sid', secret, resave: false, saveUninitialized: false,

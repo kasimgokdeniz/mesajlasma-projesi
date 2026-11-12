@@ -7,7 +7,7 @@ export async function migrate(pool) {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(926421)');
     await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (version integer PRIMARY KEY)');
-    for (const [version, file] of [[1, '001_accounts.sql'], [2, '002_chat.sql']]) {
+    for (const [version, file] of [[1, '001_accounts.sql'], [2, '002_chat.sql'], [3, '003_e2ee.sql']]) {
       const applied = await client.query('SELECT version FROM schema_migrations WHERE version = $1', [version]);
       if (!applied.rowCount) {
         await client.query(await readFile(new URL('../migrations/' + file, import.meta.url), 'utf8'));

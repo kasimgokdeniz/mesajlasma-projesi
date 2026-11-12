@@ -1,4 +1,5 @@
-/* Plaintext local-development chat. All user text is rendered using textContent. */
+import { encryptMessage, decryptMessage } from './crypto.js';
+import { Keyring } from './keyring.js';
 const chatState = document.querySelector('#chat-state');
 const messageBox = document.querySelector('#message');
 const sendButton = document.querySelector('#send');
@@ -9,15 +10,23 @@ const chatList = document.querySelector('#conversation-list');
 const chatRefresh = document.querySelector('#refresh-chats');
 const typingNode = document.querySelector('#typing');
 let socket, selected = null, nextBefore = null, generation = 0, loading = false, pending = null;
+let keyring=null, keyReady=Promise.resolve(), ready=false;
+let sending=false;
 const rendered = new Map(), writers = new Map();
-function updateComposer() { messageBox.disabled = sendButton.disabled = !selected || !socket?.connected || loading; }
+function updateComposer() { messageBox.disabled = sendButton.disabled = sending || !ready || !selected || !socket?.connected || loading; }
 function showWriters() { typingNode.textContent = [...writers.values()].join(', ') + (writers.size ? ' yazıyor…' : ''); }
 function emit(event,body) { return new Promise((resolve,reject) => {
  if (!socket?.connected) return reject(new Error('Bağlantı yok. Yeniden bağlanmayı bekleyin.'));
  socket.timeout(6000).emit(event,body,(err,result) => err ? reject(new Error('Yanıt alınamadı. Aynı mesajı yeniden deneyebilirsiniz.')) : result.ok ? resolve(result) : reject(new Error(result.error)));
 }); }
-function render(message) {
+async function render(message) {
  if(message.conversation_id !== selected) return;
+ const token=generation, ring=keyring;
+ let content;
+ try { await keyReady; content=await decryptMessage(message,ring.userId,await ring.keys()); }
+ catch(e){content=e.message;}
+ if(token!==generation || message.conversation_id!==selected)return;
+ message={...message,content};
  rendered.set(message.id,message);
  messagesNode.replaceChildren(...[...rendered.values()].sort((a,b)=>BigInt(a.id)<BigInt(b.id)?-1:1).map(m=>{
   const article=document.createElement('article'), meta=document.createElement('small'), text=document.createElement('p');
@@ -32,7 +41,7 @@ async function loadChats() {
 async function loadHistory(before, token=generation) {
  const conversationId=selected; loading=true;updateComposer();older.disabled=true;chatState.textContent='Mesajlar yükleniyor…';
  try { const data=await api(`/conversations/${conversationId}/messages${before ? `?before=${before}` : ''}`); if(token!==generation)return;
-  data.messages.forEach(render);nextBefore=data.nextBefore;older.hidden=!nextBefore;chatState.textContent=rendered.size ? '' : 'Henüz mesaj yok. İlk mesajı yazın.';
+  await Promise.all(data.messages.map(render));if(token!==generation)return;nextBefore=data.nextBefore;older.hidden=!nextBefore;chatState.textContent=rendered.size ? '' : 'Henüz mesaj yok. İlk mesajı yazın.';
  } finally {if(token===generation){loading=false;older.disabled=false;updateComposer();}}
 }
 async function selectChat(conversationId,title) {
@@ -43,13 +52,16 @@ async function selectChat(conversationId,title) {
  try {await emit('join',{conversationId});if(token!==generation)return;await loadHistory(null,token);} catch(e){if(token!==generation)return;loading=false;updateComposer();chatState.textContent='Sohbet yüklenemedi. Sohbeti yeniden seçin.';throw e;}
 }
 window.addEventListener('account-change',event=>{
+ ready=false;keyring=event.detail ? new Keyring(event.detail.id,api) : null;
+ const ring=keyring;
+ keyReady=ring ? ring.initialize().then(()=>{if(keyring===ring){ready=true;updateComposer();}}).catch(e=>{if(keyring===ring)showError(e.message);}) : Promise.resolve();
  socket?.disconnect();socket=null;selected=null;generation++;loading=false;rendered.clear();messagesNode.replaceChildren();writers.clear();showWriters();chatList.replaceChildren();older.hidden=true;
  groupForm.hidden=chatRefresh.hidden=!event.detail;updateComposer();if(!event.detail)return;
  socket=io();
  socket.on('connect',async()=>{status.textContent='Anlık bağlantı açık.';writers.clear();showWriters();try{await loadChats();if(selected){rendered.clear();messagesNode.replaceChildren();await emit('join',{conversationId:selected});await loadHistory(null);}}catch(e){showError(e.message);}updateComposer();});
  socket.on('disconnect',()=>{status.textContent='Bağlantı kesildi. Yeniden bağlanılıyor…';writers.clear();showWriters();updateComposer();});
  socket.on('connect_error',()=>{status.textContent='Sohbet bağlantısı kurulamadı. Oturumunuzu ve sunucuyu kontrol edin.';updateComposer();});
- socket.on('message',render);
+ socket.on('message',message=>{void render(message);});
  socket.on('typing',data=>{if(data.conversationId!==selected)return;if(data.active)writers.set(data.userId,data.username);else writers.delete(data.userId);showWriters();});
 });
 window.addEventListener('users-loaded',event=>{
@@ -62,7 +74,19 @@ older.onclick=()=>loadHistory(nextBefore).catch(e=>{chatState.textContent='Geçm
 messageBox.oninput=()=>{pending=null;if(selected)emit('typing',{conversationId:selected,active:!!messageBox.value.trim()}).catch(()=>{});};
 document.querySelector('#message-form').onsubmit=async event=>{
  event.preventDefault();const content=messageBox.value;if(!content.trim() || content.length>1000){showError('Mesaj 1–1000 karakter olmalı.');return;}
- if(!pending)pending={conversationId:selected,content,clientId:crypto.randomUUID ? crypto.randomUUID() : '10000000-1000-4000-8000-100000000000'.replace(/[018]/g,c=>(Number(c)^crypto.getRandomValues(new Uint8Array(1))[0]&15>>Number(c)/4).toString(16))};
- const outgoing=pending;sendButton.disabled=true;
- try{const result=await emit('message',outgoing);render(result.message);if(pending===outgoing){messageBox.value='';pending=null;}}catch(e){showError(e.message);}finally{updateComposer();}
+ const token=generation, conversationId=selected, ring=keyring;
+ if(sending || !ready || !ring || !conversationId)return;
+ sending=true;updateComposer();
+ try{
+  // Recheck the directory even on a retry, so changed identities stop sending.
+  const recipients=await ring.recipients(conversationId);
+  if(token!==generation)return;
+  if(!pending){const clientId=crypto.randomUUID();const packet=await encryptMessage(content,conversationId,ring.userId,clientId,recipients);if(token!==generation)return;pending={conversationId,packet,clientId};}
+  const outgoing=pending;const result=await emit('message',outgoing);await render(result.message);if(pending===outgoing){messageBox.value='';pending=null;}
+ }catch(e){showError(e.message);}finally{sending=false;updateComposer();}
 };
+document.querySelector('#verify-keys').onclick=async()=>{try{if(!selected || !keyring)throw new Error('Önce sohbet seçin.');await keyring.recipients(selected,true);chatState.textContent='Üye anahtarları bu tarayıcıda onaylandı.';}catch(e){showError(e.message);}};
+document.querySelector('#own-key').onclick=async()=>{try{if(!keyring)throw new Error('Önce giriş yapın.');window.alert(`Kendi anahtar parmak iziniz:\n${await keyring.ownFingerprint()}\nBunu diğer üyelerle güvenilir kanaldan karşılaştırın.`);}catch(e){showError(e.message);}};
+document.querySelector('#reset-key').onclick=async()=>{try{if(!keyring)throw new Error('Önce giriş yapın.');const ring=keyring;await ring.initialize(true);await ring.initialize();if(keyring===ring){ready=true;pending=null;updateComposer();}}catch(e){showError(e.message);}};
+// Account lookup may have finished before this module and its imports loaded.
+if(currentUser)window.dispatchEvent(new CustomEvent('account-change',{detail:currentUser}));

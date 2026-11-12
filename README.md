@@ -1,16 +1,14 @@
 # Web Tabanlı Anlık Mesajlaşma Uygulaması
 
-Hesaplar, PostgreSQL oturumları ve mevcut üç sütunlu arayüz korunarak özel/grup sohbeti, mesaj geçmişi ve yazıyor göstergesi eklendi.
+Özel ve grup sohbetleri, geçmiş, tekrar gönderim koruması ve yazıyor göstergesiyle birlikte tarayıcıda uçtan uca mesaj şifreleme desteklenir. Yazar analizi bu sürümün kapsamında değildir.
 
-**Yalnızca yerel geliştirme/test içindir. Mesajlar açık metin olarak ağdan geçer ve PostgreSQL'de saklanır; sunucu mesajları okuyabilir. E2EE yoktur.** Şifreleme, anahtar yönetimi ve yazar analizi sonraki aşamalardır. Gerçek özel bilgi kullanmayın. Yerel HTTP hesap parolalarını da ağ üzerinde şifrelemez; güvenilen test ağı ve deneme hesapları kullanın. Bu sürüm internete açık üretim servisi değildir.
+## Kurulum ve çalıştırma
 
-## Kurulum ve başlatma
-
-Node.js 22.9+, npm, PostgreSQL ve masaüstü Chrome/Edge gerekir. PowerShell komutları:
+Node.js 22.9+, PostgreSQL ve güncel masaüstü Chrome/Edge gerekir. PowerShell:
 
 ```powershell
 npm.cmd ci
-# Yalnızca .env yoksa:
+# Yalnızca yerel ayar dosyası henüz yoksa:
 Copy-Item .env.example .env
 npm.cmd run migrate
 npm.cmd run migrate:test
@@ -18,59 +16,91 @@ npm.cmd test
 npm.cmd run dev
 ```
 
-http://127.0.0.1:3000 adresini açın. İzlemesiz başlatma `npm.cmd start`, durdurma Ctrl+C. HOST varsayılanı 127.0.0.1, PORT 3000. Mevcut `.env` dosyasının üzerine kopyalamayın. PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, TEST_PGDATABASE ve en az 32 karakterlik güvenli rastgele SESSION_SECRET ayarlayın. Ortam değerleri bu aşamada değiştirilmedi; sırları paylaşmayın veya Git'e eklemeyin.
+Mevcut yerel ayar dosyasının üzerine kopyalamayın. PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, ayrı TEST_PGDATABASE ve en az 32 karakterlik rastgele SESSION_SECRET ayarlayın. Sırları sürüm kontrolüne eklemeyin. Varsayılan adres http://127.0.0.1:3000; izlemesiz başlatma `npm.cmd start`, durdurma Ctrl+C. Veritabanı kapalıyken arayüz açılır ancak veri işlemleri hata verir; `/api/health` yalnızca HTTP durumudur.
 
-`mesajlasma` ve `mesajlasma_test` veritabanları, `mesajlasma_app` kullanıcısı zaten vardır. Migration veritabanı oluşturmaz; CREATE DATABASE yetkisi gerekmez. Yeni kurulumda PostgreSQL yöneticisi iki ayrı veritabanını oluşturup uygulama kullanıcısına CONNECT ve hedef şemada USAGE/CREATE yetkisi vermelidir. Migration mevcut kayıtları silmez. PostgreSQL kapalıyken HTTP ve arayüz açılır, veri işlemleri anlaşılır genel hatayla sonuçlanır. `/api/health` yalnızca HTTP durumunu gösterir.
+Veritabanları önceden oluşturulmalıdır; migration CREATE DATABASE yapmaz, mevcut mesajları silmez. Uygulama kullanıcısına veritabanında CONNECT, hedef şemada USAGE/CREATE gerekir. TEST_PGDATABASE eksikse veya PGDATABASE ile aynıysa test bağlantısı reddedilir. Test temizliği yalnızca oluşturulan rastgele hesap/sohbet kimlikleri üzerinde çalışır.
 
-## Kullanım
+## Kullanım ve anahtar doğrulama
 
-Giriş yaptıktan sonra kişi listesindeki kullanıcıya tıklayın. İki kişi için ters yönde ve eşzamanlı isteklerde de tek özel sohbet kullanılır. Grup adı 1–100 karakter; kurucunun yanında en az iki başka kullanıcı seçilir, toplam en fazla 100 üye desteklenir. Kurucu otomatik üyedir. Grupları görmek için diğer kullanıcılar **Sohbetleri yenile** düğmesine basabilir; yeniden bağlantıda liste de yenilenir.
+Her hesap kendi tarayıcısında bir kez giriş yaparak açık anahtarını yayımlamalıdır. Kişiyi seçerek özel sohbet açın; grup için kurucunun yanında en az iki başka kullanıcı seçin. Grup adı 1–100 karakter, toplam üye sayısı en fazla 100'dür. Diğer üyeler sohbet listesini yenileyebilir. Üyelik düzenleme bu sürümde yoktur.
 
-Mesajlar gönderen ve yerel tarih/saatle gösterilir. Boş veya 1000 JavaScript karakter birimini aşan mesajlar istemcide ve sunucuda reddedilir. İçerik `textContent` ile gösterilir; HTML çalıştırılmaz. Gönderim kimliği tekrar denemelerde aynı tutulur; veritabanı aynı göndericinin aynı kimlikli mesajını ikinci kez kaydetmez. Hata sonrası metni değiştirmeden tekrar gönderilebilir. Sayfa yenilenirse başarısız taslak korunmaz.
+Göndermeden önce **Kendi parmak izim** ile her üye kendi SHA-256 parmak izini görür. **Üye anahtarlarını doğrula** ekranındaki değerleri yüz yüze veya başka güvenilir kanaldan her üyenin kendi ekranıyla karşılaştırın; ancak eşleşiyorsa onaylayın. İlk anahtar sunucudan gelir ve kendiliğinden güvenilir değildir. Karşılaştırmasız onay kimlik doğrulaması sağlamaz. Onay hesap bazında bu tarayıcıda saklanır. Bir üyenin anahtarı eksikse gönderim durur. Parmak izi değişirse yeniden açıkça doğrulanana kadar gönderim durur; ekranda DEĞİŞTİ uyarısı görünür. Geçmişin çözülebilmesi, gönderenin kimliğinin bağımsız doğrulandığı anlamına gelmez.
 
-Geçmiş son 50 mesajla açılır; **Önceki mesajlar** önceki 50 kaydı getirir. Kimlik imleci kullanılır. Sohbet seçildikten ve odaya katıldıktan sonra geçmiş alınır; gelen olaylar ve geçmiş mesaj kimliğine göre birleştirilir. Bağlantı tekrar kurulduğunda son sayfa yeniden yüklenir; daha eski kayıtlar düğmeyle alınır. Yazıyor bildirimi yalnızca ilgili sohbetin diğer katılımcılarında görünür; sunucu üç saniyelik hareketsizlikte, gönderimde, sohbet değişiminde ve kopmada temizler.
+Mesajlar 1–1000 JavaScript karakter birimi olmalıdır; boş metin reddedilir. Sunucu şifreli metnin açık uzunluğunu bilemez: bu sınır gönderen ve alıcı istemcide, şifreli veri boyutu sunucuda denetlenir. Metin `textContent` ile gösterilir. Başarısız gönderimde metni değiştirmeden tekrar deneyin; aynı şifreli paket ve gönderim kimliği korunur. Yenileme başarısız taslağı korumaz.
 
-## API, Socket.IO ve güvenlik
+Geçmiş son 50 mesajla açılır; **Önceki mesajlar** eski sayfaları getirir. Yeniden bağlantıda geçmiş tekrar yüklenir, mesaj kimliğine göre birleştirilir. Yazıyor bilgisi ilgili sohbet üyelerine gider; üç saniye hareketsizlik, gönderim, sohbet değiştirme veya kopmada temizlenir. Grup adı, üyelik, gönderen, zamanlar ve yazıyor bilgisi sunucudan gizlenmez.
+
+## Şifreleme ve yerel anahtar ömrü
+
+Her mesaj için Web Crypto ile bağımsız 256 bit AES-GCM anahtarı ve rastgele 96 bit IV üretilir; aynı AES anahtarıyla ikinci şifreleme yapılmaz. Tekrar gönderimler aynı paketi kullanır. 128 bit doğrulama etiketi ile sürüm, sohbet, gönderen ve gönderim kimliğine bağlı ek doğrulama verisi kullanılır. AES anahtarı, gönderen dahil güncel üyelerin her biri için RSA-OAEP-2048/SHA-256 ile ayrı zarflanır. Zarflar mesaj paketinin içinde saklanır; önceki şemanın `key_envelopes` tablosu kullanılmaz. Üye sayısı arttıkça paket ve şifreleme maliyeti artar.
+
+RSA özel anahtarları, hesap kimliğiyle ayrılmış IndexedDB kayıtlarında dışa aktarılamayan CryptoKey olarak saklanır. Sunucuya yalnızca açık RSA anahtarının kty/n/e alanları, şifreli anahtar zarfları ve şifreli mesaj paketleri gönderilir. Anahtar oluşturma/yayımlama ve güven kayıtları sekmeler arasında tarayıcı kilidiyle sıralanır. Oturum kapatmak anahtarları silmez; aynı köken, tarayıcı profili ve hesapla yeniden giriş geçmişi açar. Ortak cihazın işletim sistemi veya aynı kökenli zararlı koduna karşı hesap ayrımı koruma sağlamaz.
+
+Tarayıcı verisini silmek, gizli oturumu kapatmak, başka profil/cihaz kullanmak veya adresi/kökeni değiştirmek anahtarı erişilemez hale getirir. Parola anahtarı geri getirmez. Otomatik anahtar değiştirme yapılmaz: **Anahtarı yenile** kayıp ve yeniden doğrulama uyarısı üzerine açık onay ister. Yeni anahtar sonraki mesajlar içindir; kaybolan özel anahtara ait geçmiş kurtarılamaz. Yenileme sırasında mevcut eski yerel anahtarlar varsa korunur. Yedekleme, cihazlar arası anahtar aktarımı ve kurtarma desteği yoktur. Açılamayan veya değiştirilmiş paket hata gösterir; açık metne dönüş yapılmaz.
+
+Önceden açık metin saklanan mesajlar otomatik silinmez veya şifrelenmiş gibi gösterilmez; arayüz bunları **Eski açık metin kaydı (E2EE değil)** etiketiyle gösterir. Yeni gönderim yolu açık metni reddeder. Üçüncü migration eski satırları dönüştürmez; yeni yazımlar için içerik modu kısıtı ekler. Önceden kullanılan format dışı şifreli kayıtlar da açılma hatası verebilir.
+
+## Yerel ağda HTTPS
+
+Web Crypto, IndexedDB ve tarayıcı kilit desteği gerekir. Loopback/localhost geliştirmede HTTP kullanılabilir; başka bilgisayardan `http://LAN_IP:3000` güvenli bağlam değildir ve şifreli gönderim çalışmaz. Üç bilgisayarda güvenilen HTTPS kullanın; sertifika hatasını atlamayın ve tarayıcı güvenliğini devre dışı bırakmayın. HTTP'den HTTPS'ye geçiş yeni kökendir; hesapların o kökende yeniden anahtar oluşturması ve parmak izlerinin yeniden doğrulanması gerekir. Gerçek mesajlaşmaya başlamadan kalıcı HTTPS adresini seçin.
+
+Örnek: sunucuya Caddy kurun ve aşağıdaki Caddyfile'ı depo dışında tutun:
+
+```caddyfile
+mesaj.local {
+    tls internal
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+Her bilgisayarın DNS veya hosts kaydında `mesaj.local` sunucunun yerel IP'sine çözülmelidir. Yerel CA'nın **açık kök sertifikasını** her istemcinin ve gerekiyorsa tarayıcının güven deposuna güvenilir yoldan kurun; CA özel anahtarını paylaşmayın. [Yerel sertifika](https://caddyserver.com/docs/caddyfile/directives/tls) ve [ters vekil](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy) resmi belgelerine bakın.
+
+Sunucuyu ters vekilin arkasında çalıştırın:
+
+```powershell
+$env:HOST='127.0.0.1'
+$env:NODE_ENV='production'
+npm.cmd start
+```
+
+Ayrı terminalde Caddyfile'ın bulunduğu dizinde `caddy run` çalıştırın. Üç cihazda `https://mesaj.local` açın. Güvenlik duvarında yalnızca özel LAN'a TCP 443 izni verin; HTTP yönlendirmesi gerekiyorsa 80'i açın. Node'un 3000 portunu LAN'a açmayın. Üretim modu bir güvenilir ters vekil varsayar, Secure çerez kullanır ve WebSocket HTTPS kaynağını vekilin X-Forwarded-Proto başlığıyla denetler. Node'a doğrudan dış istemci erişimi olan dağıtımlar desteklenmez. Vekil aynı Host bilgisini ve WebSocket trafiğini korumalıdır.
+
+## API ve sunucu denetimleri
 
 | Uç nokta | İşlev |
 | --- | --- |
-| GET /api/health | HTTP durumu, stage: 3 |
-| POST /api/auth/register, /api/auth/login | JSON username/password; hesap ve oturum |
-| POST /api/auth/logout | JSON {}; PostgreSQL oturumunu siler |
-| GET /api/auth/me, /api/users | Oturum sahibi / diğer kullanıcıların id ve username alanları |
-| GET /api/conversations | Yalnızca üye olunan sohbetler |
-| POST /api/conversations | Özel: kind/private ve userId; grup: kind/group, name, memberIds |
-| GET /api/conversations/:id/messages?before=ID | Üyelik denetimli geçmiş; messages ve nextBefore |
+| GET /api/health | HTTP durumu, stage: 4 |
+| POST /api/auth/register, /api/auth/login, /api/auth/logout | Hesap/oturum |
+| GET /api/auth/me, /api/users | Oturum sahibi / kullanıcı listesi |
+| GET /api/keys/me | Kendi güncel açık anahtarı |
+| POST /api/keys | Oturumla eşleşen userId, publicKey ve expectedVersion; yeni açık anahtar sürümü |
+| GET /api/conversations/:id/keys | Yalnızca üyeye güncel sohbet üyesi anahtarları |
+| GET/POST /api/conversations | Sohbet listesi / oluşturma |
+| GET /api/conversations/:id/messages?before=ID | Üyelik denetimli geçmiş |
 
-Socket.IO aynı kökendeki oturum çerezini kullanır. `join {conversationId}`, `message {conversationId, content, clientId}` ve `typing {conversationId, active}` olayları onay yanıtı ister: `{ok: true, ...}` veya `{ok: false, error}`. Gönderen istemci paketinden alınmaz. Her olayda PostgreSQL oturumu yeniden yüklenir, kimlik/paket ve üyelik doğrulanır. Yayın öncesi alıcı oturumları da doğrulanır. Açık bağlantılar oturum iptali/süre sonu için saniyede bir kontrol edilir; geçersiz oturumla işlem yapılamaz. Olay sırası asenkron sorgularda korunur. İstemci her seferinde tek sohbet odasına katılır.
+Socket.IO `join {conversationId}`, `typing {conversationId,active}` ve `message {conversationId,clientId,packet}` olaylarını kullanır. Packet v/iv/ciphertext/envelopes; her zarf userId/keyVersion/wrapped içerir. Tüm güncel üyeler için tam birer zarf gerekir. Fazladan alan, özel anahtar alanları, yanlış base64, sürüm, IV/şifreli metin/zarf boyutu veya eksik/üye olmayan alıcı reddedilir. Gönderen sunucudaki oturumdan alınır. Aynı gönderim kimliği farklı pakete atanamaz; birebir tekrar mevcut kaydı döndürür.
 
-SQL parametrelidir. Özel çift için UNIQUE anahtarı; mesaj için `(sender_id, client_id)` UNIQUE indeksi vardır. Mesaj metni veya sırlar loglanmaz. HTTP JSON ve Socket.IO paket sınırı 8 KB'dir. Çapraz kaynak yazma/bağlantı istekleri reddedilir; Socket.IO CORS açılmaz. Parolalar rastgele tuzlu scrypt ile özetlenir. Çerez HttpOnly, SameSite=Lax ve sekiz saat ömürlüdür; üretim ayarı Secure kullanır. HTTPS/ters vekil üretim dağıtımı ve güvenlik denetimi bu aşamanın kapsamı değildir. Giriş/mesaj hız sınırlaması henüz yoktur.
+HTTP JSON ve Socket.IO paket sınırı 64 KiB'dir; 100 üyeye ayrı RSA zarfı için önceki 8 KiB sınırı artırılmıştır. Şifreli metin en fazla 4016 byte, IV 12 byte, RSA zarfı 256 byte'dır. Açık anahtar yalnızca 2048 bit RSA/65537 kabul edilir. SQL parametrelidir; üyelik ve oturum her olayda, alıcı oturumları yayın öncesinde denetlenir. İptal/süresi dolmuş oturumlar açık bağlantıda da reddedilir. Çapraz kaynak engeli, CSP, HttpOnly/SameSite çerezler korunur. Mesajlar ve anahtarlar loglanmaz. Parolalar tuzlu scrypt özetidir.
 
-## Dosyalar ve bağımlılıklar
+## Güvenlik sınırları
 
-- `server/chat.js`: doğrulama, üyelik, sohbet oluşturma, geçmiş ve mesaj kaydı; HTTP rotaları.
-- `server/realtime.js`: ortak oturumla Socket.IO, odalar, olaylar ve yazıyor zaman aşımı.
-- `public/app.js`, `public/chat.js`, `index.html`, `styles.css`: mevcut hesap ekranı ve sohbet etkileşimleri.
-- `migrations/002_chat.sql`: özel çift ve tekrar gönderim anahtarı, açık metin geliştirme alanı. Eski encrypted_content/key_version alanları korunur ancak bu aşamada kullanılmaz. Anahtar/profil tabloları kullanılmaz.
-- `server/migrate.js`: transaction ve advisory lock ile sürümlü, tekrar çalıştırılabilir migration.
-- `test/`: gerçek HTTP, PostgreSQL ve Socket.IO kontrolleri.
+Bağımsız güvenlik denetimi yapılmamıştır; standart Web Crypto ilkellerini kullanan uygulamaya özgü protokoldür. İleri gizlilik, Double Ratchet, bağımsız mesaj imzası ve anahtar şeffaflığı yoktur. RSA özel anahtarı ele geçirilirse kaydedilmiş eski zarflar çözülebilir. GCM paket bütünlüğünü ve anahtara sahip olmayı doğrular; kötü niyetli sunucuya karşı bağımsız gönderen kanıtı sağlamaz. Gönderen kimliği için sunucu oturum/erişim denetimine güvenilir.
 
-Mevcut Express, pg, express-session, connect-pg-simple korunmuştur. Yeni `socket.io` gerçek zamanlı iletişim için, yalnızca geliştirme bağımlılığı `socket.io-client` gerçek protokol entegrasyon testleri için gereklidir. Build/lint scripti yoktur.
+Parmak izi karşılaştırması anahtar dizinindeki değiştirmeyi fark etmeye yardımcı olur. Sunucu ele geçirilip JavaScript değiştirilirse tarayıcıdaki açık metin ve anahtar işlemleri kötüye kullanılabilir; dışa aktarılamayan anahtar bunu engellemez. XSS, zararlı eklenti, cihaz/işletim sistemi erişimi ve ekran görüntüsü de kapsam dışıdır. HTTPS giriş parolasını, çerezi ve istemci kodu aktarımını korur. Üyeler metni kopyalayabilir; trafik metaverisi gizlenmez. Hız sınırlaması, çok sunuculu dağıtım ve üretim sertleştirmesi yoktur.
 
-## Gerçek test sonuçları ve sınırlamalar
+## Testler ve manuel kabul
 
-`npm.cmd test`: **14 test geçti, 0 başarısız, 0 atlanan**. Hesap/çerez/giriş/çıkış ve erişim testleri korunmuştur. Yeni testlerde dört ayrı hesapla eşzamanlı özel sohbet benzersizliği, grup kurucusu/üyeler, özel ve grup mesaj iletimi, sunucunun göndericiyi belirlemesi, tekrar gönderim, 55 mesajla sayfalama, yeniden bağlantı geçmişi, geçersiz/oturumsuz/çapraz kaynak bağlantı, üye olmayanın geçmiş/join/send/typing reddi, hatalı paket, boş/uzun mesaj, yazıyor zaman aşımı/gönderim/kopma ve açık socket üzerinde çıkış/süresi dolmuş oturum doğrulanır. Her iki migration komutu da gerçekten çalıştırıldı. npm bağımlılık kurulumu denetiminde 0 açık bildirildi.
+`npm.cmd test` ayrı test veritabanında mevcut hesap/oturum/üyelik, sohbet benzersizliği, yayın, yazıyor zaman aşımı, sayfalama ve tekrar gönderim kontrollerini çalıştırır. Şifreli paket, bozuk veri, açık metin reddi, eksik üye anahtarı, eski kayıt etiketi ve API/veritabanı gizlilik kontrolleri eklenmiştir. Gerçek PostgreSQL/HTTP/Socket.IO ve Web Crypto kullanılır.
 
-Testler yalnızca `TEST_PGDATABASE` üzerinden çalışır; eksik veya PGDATABASE ile aynı hedef reddedilir. Temizlik yalnızca testin oluşturduğu rastgele hesap/sohbet kimlikleri üzerinde yapılır. Uygulama veritabanında test temizliği, TRUNCATE veya veritabanı oluşturma yapılmaz.
+Tarayıcı testi geçici, ayrı Chrome/Edge oturumlarında gerçek kayıt formu, özel ve üç üyeli grup gönderimi, parmak izi onayı, yenileme, IndexedDB, anahtar kaybı ve yenilemesini çalıştırır. WebSocket çerçevelerini, geçmiş API'sini ve yeni veritabanı satırlarını açık mesaj/özel anahtar sızıntısı için denetler; özel CryptoKey dışa aktarma girişiminin reddini doğrular. Tarayıcı bulunamazsa test gerekçeyle atlanır; `CHROME_PATH` ile yol verilebilir. Geçici tarayıcı profili test sonunda silinir. Bunlar bağımsız güvenlik denetimi değildir.
 
-Chrome/Edge görsel/etkileşimli kontrolleri ve üç fiziksel bilgisayarlı LAN testi **çalıştırılmadı; manuel test gerekli**. Otomasyon gerçek PostgreSQL/HTTP/Socket.IO kullanır; tarayıcı DOM etkileşim testi değildir. Grup adı/üyelik düzenleme, bildirim/okundu bilgisi, kalıcı taslak, dosya gönderimi, çok sunuculu dağıtım yoktur. Sunucu yeniden başlatılırsa yazıyor durumu sıfırlanır, mesajlar korunur.
+Üç fiziksel bilgisayarda manuel kabul:
 
-## Aynı yerel ağdaki üç bilgisayarla manuel kabul testi
+1. HTTPS kurulumuyla A/B/C hesaplarını ayrı cihazlarda açın, parmak izlerini güvenilir kanaldan karşılaştırın.
+2. A/B özel sohbetinde iki yönde mesaj gönderin; C'nin geçmiş, anahtar dizini ve socket erişimi reddedilmeli. Aynı çift için tek sohbet kalmalı.
+3. A/B/C grubunda tüm cihazlardan gönderin, iki saniyelik teslim hedefini ölçün. Yazıyor göstergesi yalnızca ilgili sohbette görünmeli ve üç saniye durunca temizlenmeli.
+4. Yenileme/yeniden bağlantı ve 50'den fazla mesajla geçmişi açın; yinelenme olmamalı, HTML metin görünmeli. Boş/1001 karakter mesaj reddedilmeli.
+5. Yalnızca deneme hesabının ayrı test profilinde yerel veriyi silin: eski mesaj hata göstermeli, gönderim durmalı. Açık onayla anahtarı yenileyin; diğer üyeler yeni parmak izini onaylayana kadar gönderememeli. Yeni mesajlar açılmalı, kayıp anahtara ait eskiler açılmamalı.
+6. Başka sekmeden çıkış, ağ kesilmesi ve sunucu/veritabanı durmasını deneyin. Ağ/veritabanında yeni mesaj metni veya özel anahtar bulunmamalı; eski açık metin kayıtları ayrı değerlendirilmelidir.
 
-1. Sunucu bilgisayarda PostgreSQL'i başlatın, migration çalıştırın. PowerShell'de `$env:HOST='0.0.0.0'` ve ardından `npm.cmd start` çalıştırın. `ipconfig` ile sunucunun yerel IPv4 adresini bulun. Güvenlik duvarında TCP 3000 iznini yalnızca özel yerel ağla sınırlayın; yönlendiricide internet portu açmayın.
-2. Üç bilgisayarda Chrome veya Edge ile `http://SUNUCU_IPV4:3000` açın. Üç farklı deneme hesabı A/B/C oluşturun; kişi listelerini yenileyin. Oturumsuz tarayıcıda kullanıcı/geçmiş API erişiminin reddedildiğini doğrulayın.
-3. A, B'yi seçip mesaj göndersin; B aynı sohbeti A üzerinden açsın. İki yönde tekrar açınca tek özel sohbet ve aynı geçmiş görünmeli. A/B sohbeti C'nin listesinde görünmemeli.
-4. A en az B ve C'yi seçip grup oluştursun. B/C sohbet listesini yenileyip gruba katılsın. Üç hesapla mesaj gönderin; doğru gönderen ve saat görünmeli. 50'den fazla mesajla önceki sayfayı yükleyin. Mesajın diğer bilgisayarda en geç iki saniyede göründüğünü ölçün; bu performans kabulü fiziksel ağda henüz ölçülmedi.
-5. A yazarken yalnızca aynı sohbeti açık tutan üyelerde yazıyor göstergesi görünmeli; üç saniye durunca, gönderince, başka sohbet seçince ve A'nın bağlantısı kesilince silinmeli. B özel sohbet, C grup açıkken bildirimler karışmamalı.
-6. Boş ve 1001 karakter mesajı deneyin. `<b>test</b>` düz metin görünmeli. Sayfayı yenileyin, geçmiş korunmalı ve yinelenmemeli. A'nın ağını kesip geri açın; bağlantı durumu ve geçmiş düzelmeli. Onay kaybolduysa aynı metni tekrar gönderin, ikinci kayıt oluşmamalı.
-7. Başka sekmeden çıkış yapın; eski açık sekmeyle gönderim reddedilmeli. Üye olmayan ayrı deneme hesabıyla bilinen sohbet kimliğine erişim reddedilmeli. PostgreSQL ve HTTP sunucusunu durdurup hata/yeniden deneme durumlarını kontrol edin.
+Fiziksel üç bilgisayarlı test, LAN performans ölçümü ve bu örnek HTTPS dağıtımının uçtan uca kabulü henüz yapılmadı.

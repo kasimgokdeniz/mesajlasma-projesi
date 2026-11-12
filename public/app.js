@@ -1,4 +1,4 @@
-﻿const status = document.querySelector('#connection-status');
+const status = document.querySelector('#connection-status');
 const error = document.querySelector('#error-message');
 const retry = document.querySelector('#retry');
 const form = document.querySelector('#account-form');
@@ -60,7 +60,7 @@ async function checkServer() {
   status.textContent = 'Yükleniyor: sunucu kontrol ediliyor…';
   try {
     const health = await api('/health');
-    if (health.status !== 'ok' || health.stage !== 3) throw new Error('Beklenmeyen sunucu yanıtı.');
+    if (health.status !== 'ok' || health.stage !== 4) throw new Error('Beklenmeyen sunucu yanıtı.');
     status.textContent = 'Sunucu eri\u015filebilir.';
     try {
       const data = await api('/auth/me');
