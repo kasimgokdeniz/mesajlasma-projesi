@@ -1,4 +1,5 @@
 import { encryptMessage, decryptMessage } from './crypto.js';
+import { setWritingContext, writingChoice } from './writing-panel.js';
 import { Keyring } from './keyring.js';
 const chatState = document.querySelector('#chat-state');
 const messageBox = document.querySelector('#message');
@@ -22,17 +23,20 @@ function emit(event,body) { return new Promise((resolve,reject) => {
 async function render(message) {
  if(message.conversation_id !== selected) return;
  const token=generation, ring=keyring;
- let content;
- try { await keyReady; content=await decryptMessage(message,ring.userId,await ring.keys()); }
+ let content, decrypted=false;
+ try { await keyReady; content=await decryptMessage(message,ring.userId,await ring.keys()); decrypted=true; }
  catch(e){content=e.message;}
  if(token!==generation || message.conversation_id!==selected)return;
- message={...message,content};
+ message={...message,content,decrypted};
  rendered.set(message.id,message);
+ renderMessages();
+ if(!loading) chatState.textContent=rendered.size ? '' : 'Henüz mesaj yok. İlk mesajı yazın.';
+}
+function renderMessages() {
  messagesNode.replaceChildren(...[...rendered.values()].sort((a,b)=>BigInt(a.id)<BigInt(b.id)?-1:1).map(m=>{
   const article=document.createElement('article'), meta=document.createElement('small'), text=document.createElement('p');
-  meta.textContent=`${m.username} · ${new Date(m.created_at).toLocaleString('tr-TR')}`; text.textContent=m.content; article.append(meta,text); return article;
+  meta.textContent=`${m.username} · ${new Date(m.created_at).toLocaleString('tr-TR')}`; text.textContent=m.content; article.append(meta,text); const choice=writingChoice(m); if(choice)article.append(choice); return article;
  }));
- if(!loading) chatState.textContent=rendered.size ? '' : 'Henüz mesaj yok. İlk mesajı yazın.';
 }
 async function loadChats() {
  const data=await api('/conversations');
@@ -47,6 +51,7 @@ async function loadHistory(before, token=generation) {
 async function selectChat(conversationId,title) {
  if(selected && socket?.connected) emit('typing',{conversationId:selected,active:false}).catch(()=>{});
  selected=conversationId;pending=null;messageBox.value='';generation++;rendered.clear();writers.clear();showWriters();messagesNode.replaceChildren();older.hidden=true;
+ setWritingContext({conversationId,ring:keyring,messages:rendered,api},renderMessages);
  document.querySelector('#chat-title').textContent=title; loading=true;updateComposer();
  const token = generation;
  try {await emit('join',{conversationId});if(token!==generation)return;await loadHistory(null,token);} catch(e){if(token!==generation)return;loading=false;updateComposer();chatState.textContent='Sohbet yüklenemedi. Sohbeti yeniden seçin.';throw e;}
@@ -56,6 +61,7 @@ window.addEventListener('account-change',event=>{
  const ring=keyring;
  keyReady=ring ? ring.initialize().then(()=>{if(keyring===ring){ready=true;updateComposer();}}).catch(e=>{if(keyring===ring)showError(e.message);}) : Promise.resolve();
  socket?.disconnect();socket=null;selected=null;generation++;loading=false;rendered.clear();messagesNode.replaceChildren();writers.clear();showWriters();chatList.replaceChildren();older.hidden=true;
+ setWritingContext(null,renderMessages);
  groupForm.hidden=chatRefresh.hidden=!event.detail;updateComposer();if(!event.detail)return;
  socket=io();
  socket.on('connect',async()=>{status.textContent='Anlık bağlantı açık.';writers.clear();showWriters();try{await loadChats();if(selected){rendered.clear();messagesNode.replaceChildren();await emit('join',{conversationId:selected});await loadHistory(null);}}catch(e){showError(e.message);}updateComposer();});

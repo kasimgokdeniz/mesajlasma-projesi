@@ -46,3 +46,4 @@ footer { color: #53676e; font-size: 12px; padding-top: 8px; }
 #group-members input { width: auto; margin-right: 8px; }
 #conversation-list, #user-list { list-style: none; padding-left: 0; }
 #conversation-list button, #user-list button { margin-bottom: 6px; }
+#messages input[type=checkbox] { width: auto; margin-right: 8px; }

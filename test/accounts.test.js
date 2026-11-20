@@ -67,7 +67,14 @@ test('PostgreSQL üzerinde hesap, oturum, erişim ve üyelik kabul kontrolleri',
     assert.equal((await request('/auth/register', { username: username.toUpperCase(), password })).status, 409);
     const list = await request('/users', undefined, cookie);
     assert.equal(list.status, 200);
-    for (const entry of (await list.json()).users) assert.deepEqual(Object.keys(entry).sort(), ['id', 'username']);
+    const second = await request('/auth/register', { username: username + '_b', password });
+    assert.equal(second.status, 201);
+    const other = (await second.json()).user;
+    ids.push(other.id);
+    const entries = (await (await request('/users', undefined, cookie)).json()).users;
+    assert.ok(entries.some(entry => entry.id === other.id && entry.username === other.username));
+    assert.ok(entries.every(entry => entry.id !== user.id));
+    for (const entry of entries) assert.deepEqual(Object.keys(entry).sort(), ['id', 'username']);
   });
   await t.test('Çıkış oturumu iptal eder, yanlış parola reddedilir, giriş oturumu yeniler', async () => {
     const oldCookie = cookie;

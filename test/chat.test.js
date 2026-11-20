@@ -6,13 +6,13 @@ import { io as client } from 'socket.io-client';
 import { createPool } from '../server/db.js';
 import { migrate } from '../server/migrate.js';
 import { createChatServer } from '../server/realtime.js';
-import { identity, encryptMessage, decryptMessage } from '../public/crypto.js';
+import { identity, encryptMessage, decryptMessage, encryptProfile, decryptProfile } from '../public/crypto.js';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 test('Gerçek PostgreSQL ve Socket.IO sohbet kabul kontrolleri', {timeout:40000}, async t=>{
  const pool=createPool({test:true});const users=[],sockets=[],conversations=[];
  const {server,io}=createChatServer({pool,secret:randomBytes(48).toString('hex')});
  t.after(async()=>{sockets.forEach(s=>s.disconnect());await new Promise(resolve=>io.close(resolve));
-  for(const id of conversations){await pool.query('DELETE FROM messages WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM conversation_members WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM conversations WHERE id=$1',[id]);}
+  for(const id of conversations){await pool.query('DELETE FROM writing_profiles WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM messages WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM conversation_members WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM conversations WHERE id=$1',[id]);}
   for(const u of users){await pool.query('DELETE FROM user_public_keys WHERE user_id=$1',[u.id]);await pool.query("DELETE FROM sessions WHERE sess->>'userId'=$1",[u.id]);await pool.query('DELETE FROM users WHERE id=$1',[u.id]);}await pool.end();
  });
  await migrate(pool);server.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;
@@ -51,6 +51,39 @@ test('Gerçek PostgreSQL ve Socket.IO sohbet kabul kontrolleri', {timeout:40000}
   assert.equal((await request('/keys',{userId:users[0].id,publicKey:users[0].local.publicKey,expectedVersion:0},users[0].cookie)).status,409);
   assert.equal((await request('/keys',{userId:users[0].id,publicKey:users[0].local.publicKey,expectedVersion:1,privateKey:'forbidden'},users[0].cookie)).status,400);
   assert.equal((await request('/keys',{userId:users[1].id,publicKey:users[0].local.publicKey,expectedVersion:1},users[0].cookie)).status,400);
+ });
+ await t.test('Yazım profili sahipliği, şifreli saklama ve güncelleme',async()=>{
+  const owner=users[0], reader=users[1], outsider=users[2];
+  const root='/conversations/'+privateId+'/writing-profiles/';
+  const path=root+owner.id;
+  const get=async(cookie)=>(await(await request(path,undefined,cookie)).json()).profile;
+  assert.equal(await get(reader.cookie),null);
+  const {keys}=await(await request('/conversations/'+privateId+'/keys',undefined,owner.cookie)).json();
+  const samples=[{id:'1',text:'Bilinen örnek: '+randomUUID()}];
+  const packet=await encryptProfile(samples,privateId,owner.id,keys);
+  assert.equal((await request(path)).status,401);
+  assert.equal((await request(path,undefined,outsider.cookie)).status,403);
+  assert.equal((await request(root+outsider.id,{packet},outsider.cookie)).status,403);
+  assert.equal((await request(path,{packet},reader.cookie)).status,403);
+  assert.equal((await request(root+encodeURIComponent("1' OR '1'='1"),undefined,owner.cookie)).status,400);
+  for(const body of [{samples},{packet,privateKey:'forbidden'},{packet:{...packet,privateKey:'forbidden'}},{packet:{...packet,envelopes:packet.envelopes.slice(0,1)}}]){
+   assert.equal((await request(path,body,owner.cookie)).status,400);
+  }
+  assert.equal((await request(path,{packet},owner.cookie)).status,200);
+  const stored=await get(reader.cookie);
+  assert.deepEqual(stored.encrypted_profile,packet);
+  assert.ok(!JSON.stringify(stored).includes(samples[0].text));
+  assert.deepEqual(await decryptProfile(stored.encrypted_profile,privateId,owner.id,reader.id,[reader.local]),samples);
+  await assert.rejects(decryptProfile(packet,groupId,owner.id,reader.id,[reader.local]),/doğrulanamadı/);
+  await assert.rejects(decryptProfile(packet,privateId,reader.id,reader.id,[reader.local]),/doğrulanamadı/);
+  await assert.rejects(decryptProfile(packet,privateId,owner.id,reader.id,[]),/anahtar/);
+  const replacement=[{id:'2',text:'Güncel örnek: '+randomUUID()}];
+  const next=await encryptProfile(replacement,privateId,owner.id,keys);
+  assert.equal((await request(path,{packet:next},owner.cookie)).status,200);
+  const rows=(await pool.query('SELECT encrypted_profile FROM writing_profiles WHERE conversation_id=$1 AND user_id=$2',[privateId,owner.id])).rows;
+  assert.deepEqual(rows,[{encrypted_profile:next}]);
+  assert.ok(!JSON.stringify(rows).includes(replacement[0].text));
+  assert.deepEqual(await decryptProfile(rows[0].encrypted_profile,privateId,owner.id,reader.id,[reader.local]),replacement);
  });
  await t.test('Özel mesaj yayınlanır, gönderen sunucudan; tekrar kayıt ve boş/uzun mesaj engeli',async()=>{
   await emit(a,'join',{conversationId:privateId});await emit(b,'join',{conversationId:privateId});

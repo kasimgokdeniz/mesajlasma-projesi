@@ -12,7 +12,7 @@
 <body>
   <header class="page-header">
     <div><p class="eyebrow">WEB TABANLI MESAJLAŞMA</p><h1>Birlikte konuşmanın başlangıcı.</h1></div>
-    <span class="badge">Aşama 4 / 5 · Şifreleme</span>
+    <span class="badge">Yazar analizi</span>
   </header>
   <main>
     <p class="notice">Yeni mesajlar tarayıcıda şifrelenir. Göndermeden önce üye anahtarlarını güvenilir başka bir kanaldan doğrulayın. Yerel anahtarlar kaybolursa eski şifreli mesajlar açılamaz.</p>
@@ -45,6 +45,14 @@
         <p id="chat-state" role="status">Sohbet se&#231;in.</p>
         <button id="own-key" type="button">Kendi parmak izim</button><button id="verify-keys" type="button">Üye anahtarlarını doğrula</button><button id="reset-key" type="button">Anahtarı yenile</button>
         <button id="older" type="button" hidden>&#214;nceki mesajlar</button><div id="messages" aria-live="polite"></div><p id="typing" role="status"></p>
+        <details id="writing-panel" hidden>
+          <summary>Yazar analizi</summary>
+          <p class="muted">Bir gönderenden 2–8 mesaj ve toplam en az 40 kelime seçin. Sonuç yazım benzerliğini gösterir ve kesin kimlik kanıtı değildir.</p>
+          <label for="writing-mode">İşlem</label>
+          <select id="writing-mode"><option value="analysis">Sonraki mesajları analiz et</option><option value="profile">Kendi bilinen örneklerimi seç</option></select>
+          <button id="writing-action" type="button">Seçimi analiz et</button>
+          <p id="writing-status" role="status"></p>
+        </details>
         <form id="message-form"><label for="message">Mesaj</label><textarea id="message" rows="2" maxlength="1000" required disabled></textarea><button id="send" disabled>G&#246;nder</button></form>
       </section>
     </div>

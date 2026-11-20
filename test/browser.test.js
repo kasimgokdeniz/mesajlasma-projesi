@@ -24,7 +24,7 @@ class CDP {
   async evaluate(sessionId,expression){const result=await this.call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},sessionId);if(result.exceptionDetails)throw new Error(result.exceptionDetails.exception?.description ?? 'Tarayıcı JavaScript hatası');return result.result.value;}
 }
 
-test('Chrome: iki hesap özel, üç hesap grup, IndexedDB geçmişi ve anahtar kaybı', {timeout:90000},async t=>{
+test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar kaybı', {timeout:90000},async t=>{
   const executable=await chromePath();if(!executable){t.skip('Chrome/Edge bulunamadı; CHROME_PATH ayarlayın.');return;}
   const pool=createPool({test:true}),users=[],conversations=[],frames=[],browserErrors=[];
   const {server,io}=createChatServer({pool,secret:randomBytes(48).toString('hex')});
@@ -34,7 +34,7 @@ test('Chrome: iki hesap özel, üç hesap grup, IndexedDB geçmişi ve anahtar k
     if(cdp){try{await cdp.call('Browser.close');}catch{}cdp.ws.close();}
     if(chrome && chrome.exitCode===null){chrome.kill();await Promise.race([once(chrome,'exit'),delay(3000)]);}
     await new Promise(r=>io.close(r));
-    for(const id of conversations){await pool.query('DELETE FROM messages WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM conversation_members WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM conversations WHERE id=$1',[id]);}
+    for(const id of conversations){await pool.query('DELETE FROM writing_profiles WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM messages WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM conversation_members WHERE conversation_id=$1',[id]);await pool.query('DELETE FROM conversations WHERE id=$1',[id]);}
     for(const u of users){await pool.query('DELETE FROM user_public_keys WHERE user_id=$1',[u.id]);await pool.query("DELETE FROM sessions WHERE sess->>'userId'=$1",[u.id]);await pool.query('DELETE FROM users WHERE id=$1',[u.id]);}
     await pool.end();
     // Only remove the exact temporary profile created by this test.
@@ -90,12 +90,43 @@ test('Chrome: iki hesap özel, üç hesap grup, IndexedDB geçmişi ve anahtar k
   await send(a,'unverified');await until(()=>ev(a,`document.querySelector('#error-message').textContent.includes('doğrula')`));
   assert.equal((await pool.query('SELECT 1 FROM messages WHERE conversation_id=$1',[privateId])).rowCount,0);
   await verify(a,privateId);await verify(b,privateId);
-  const privateText='private-'+randomBytes(16).toString('hex');await send(a,privateText);await contains(b,privateText);await contains(a,privateText);
+  const privateText='<img src=x onerror=alert(1)> private-'+randomBytes(16).toString('hex');await send(a,privateText);await contains(b,privateText);await contains(a,privateText);
   const replyText='reply-'+randomBytes(16).toString('hex');await send(b,replyText);await contains(a,replyText);
   await cdp.call('Page.reload',{},b);
   await until(()=>ev(b,`typeof currentUser!=='undefined' && !!currentUser && document.querySelector('#connection-status').textContent==='Anlık bağlantı açık.'`));await open(b,privateId);await contains(b,privateText);await contains(b,replyText);
   const denied=await ev(d,`fetch('/api/conversations/${privateId}/keys').then(r=>r.status)`);assert.equal(denied,403);
   assert.equal(await ev(d,`fetch('/api/conversations/${privateId}/messages').then(r=>r.status)`),403);
+  assert.equal(await ev(b,"document.querySelector('#messages img') === null"),true);
+  const examples=[
+    'selam, bugün toplantı için hazırlık yapıyorum. dosyaları tek tek kontrol edip sana birazdan haber veririm. eksik kalan belgeleri de akşam tamamlarım.',
+    'selam, yarınki toplantı için notlara bakıyorum. belgeleri sabah yanımda getiririm. erken gelirsen birlikte bir kahve içeriz, başka bir şey gerekirse yaz.',
+  ];
+  const candidates=[
+    'selam, bugün belgeleri göndermeden önce son bir kontrol yaparım. toplantıda konuşacağımız konuları da listeye ekledim, akşam eve gidince sana haber veririm.',
+    'yarın sabah erken gelirim, toplantıdan önce kahve alırım. kalan dosyaları yanımda getiriyorum. bir şey eksik olursa bana yaz, birlikte hallederiz.',
+  ];
+  const choose=(page, texts)=>ev(page, `for (const text of ${JSON.stringify(texts)}) {
+    [...document.querySelectorAll('#messages article')].find(article=>article.querySelector('p').textContent===text)
+      .querySelector('input').click();
+  } true`);
+  const writingStatus=(page,text)=>until(()=>ev(page,`document.querySelector('#writing-status').textContent.startsWith(${JSON.stringify(text)})`));
+  const runWriting=page=>ev(page,"document.querySelector('#writing-action').click();true");
+  await ev(a, "document.querySelector('#writing-panel').open=true;const mode=document.querySelector('#writing-mode');mode.value='profile';mode.dispatchEvent(new Event('change'));true");
+  await runWriting(a);await writingStatus(a,'Örnek yok');
+  for(const text of examples){await send(a,text);await contains(a,text);await contains(b,text);}
+  await choose(a,examples);await runWriting(a);await writingStatus(a,'Yazım profili kaydedildi.');
+  const profilePath='/conversations/'+privateId+'/writing-profiles/'+users[0].id;
+  const savedProfile=await ev(b,'api('+JSON.stringify(profilePath)+')');
+  for(const text of examples)assert.ok(!JSON.stringify(savedProfile).includes(text));
+  await ev(b,"document.querySelector('#writing-panel').open=true;true");
+  await until(()=>ev(b,"!!document.querySelector('#messages input')"));
+  await choose(b,[privateText]);await runWriting(b);await writingStatus(b,'Yetersiz metin');
+  await choose(b,[privateText]);
+  await choose(b,examples);await runWriting(b);await writingStatus(b,'İşlem tamamlanamadı. Örneklerden sonra');
+  await choose(b,examples);
+  for(const text of candidates){await send(a,text);await contains(a,text);await contains(b,text);}
+  await choose(b,candidates);await runWriting(b);await writingStatus(b,'Uyum');
+  assert.deepEqual(await ev(b,'api('+JSON.stringify(profilePath)+')'),savedProfile);
   const groupId=await create({kind:'group',name:'Browser group',memberIds:[users[1].id,users[2].id]});
   for(const page of [a,b,c]){await open(page,groupId);await verify(page,groupId);}
   const groupTexts=[];
@@ -103,7 +134,7 @@ test('Chrome: iki hesap özel, üç hesap grup, IndexedDB geçmişi ve anahtar k
   await cdp.call('Page.reload',{},c);await until(()=>ev(c,`typeof currentUser!=='undefined' && !!currentUser && document.querySelector('#connection-status').textContent==='Anlık bağlantı açık.'`));await open(c,groupId);for(const text of groupTexts)await contains(c,text);
   const apiHistory=await ev(b,`api('/conversations/${groupId}/messages')`);
   const rows=(await pool.query('SELECT * FROM messages WHERE conversation_id=ANY($1::bigint[])',[conversations])).rows;
-  for(const text of [privateText,replyText,...groupTexts]){assert.ok(!JSON.stringify(rows).includes(text));assert.ok(!JSON.stringify(apiHistory).includes(text));assert.ok(!frames.some(frame=>frame.includes(text)));}
+  for(const text of [privateText,replyText,...examples,...candidates,...groupTexts]){assert.ok(!JSON.stringify(rows).includes(text));assert.ok(!JSON.stringify(apiHistory).includes(text));assert.ok(!frames.some(frame=>frame.includes(text)));}
   assert.ok(rows.every(m=>m.content===null && m.encrypted_content));
   for(const serialized of [JSON.stringify(rows),JSON.stringify(apiHistory),...frames])assert.ok(!/"(?:privateKey|d|p|q|dp|dq|qi)"\s*:/.test(serialized));
   assert.equal(await ev(b,`import('/keyring.js').then(async({Keyring})=>{const k=(await new Keyring(currentUser.id,api).keys())[0].privateKey;try{await crypto.subtle.exportKey('jwk',k);return false;}catch{return !k.extractable;}})`),true);

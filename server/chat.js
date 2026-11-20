@@ -27,20 +27,28 @@ export async function saveMessage(pool, userId, body) {
   if (!body || Object.keys(body).sort().join(',')!=='clientId,conversationId,packet' || typeof body.clientId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(body.clientId)) throw new ChatError('Yalnızca şifreli mesaj ve geçerli gönderim kimliği kabul edilir.');
   await member(pool,body.conversationId,userId);
   const packet=body.packet;
-  const exact=(o,keys)=>o && typeof o==='object' && !Array.isArray(o) && Object.keys(o).sort().join(',')===keys;
-  const base64=(s,min,max)=>typeof s==='string' && s.length%4===0 && /^[A-Za-z0-9+/]+={0,2}$/.test(s) && Buffer.from(s,'base64').toString('base64')===s && Buffer.from(s,'base64').length>=min && Buffer.from(s,'base64').length<=max;
-  if (!exact(packet,'ciphertext,envelopes,iv,v') || packet.v!==1 || !base64(packet.iv,12,12) || !base64(packet.ciphertext,17,4016) || !Array.isArray(packet.envelopes) || packet.envelopes.length<2 || packet.envelopes.length>100 || Buffer.byteLength(JSON.stringify(body))>65536) throw new ChatError('Geçersiz şifreli mesaj paketi.');
-  for(const e of packet.envelopes) if(!exact(e,'keyVersion,userId,wrapped') || !Number.isSafeInteger(e.keyVersion) || e.keyVersion<1 || !base64(e.wrapped,256,256)) throw new ChatError('Geçersiz anahtar zarfı.'); else id(e.userId);
+  validatePacket(packet,4016);
+  if (Buffer.byteLength(JSON.stringify(body))>65536) throw new ChatError('Şifreli mesaj paketi çok büyük.');
   // An exact retry remains valid after key rotation, but never alters its packet.
   const existing=(await pool.query('SELECT m.*,u.username FROM messages m JOIN users u ON u.id=m.sender_id WHERE sender_id=$1 AND client_id=$2',[userId,body.clientId])).rows[0];
   const same=p=>JSON.stringify(canonical(p))===JSON.stringify(canonical(packet));
   if(existing){if(existing.conversation_id!==body.conversationId || !same(existing.encrypted_content)) throw new ChatError('Gönderim kimliği başka mesajda kullanılmış.'); return publicMessage(existing);}
-  const keys=await conversationKeys(pool,userId,body.conversationId);
-  if(new Set(packet.envelopes.map(e=>e.userId)).size!==keys.length || packet.envelopes.length!==keys.length || keys.some(k=>!k.key_version || !packet.envelopes.some(e=>e.userId===k.user_id && e.keyVersion===k.key_version))) throw new ChatError('Üyelerin anahtarları eksik veya değişti. Anahtarları yeniden doğrulayın.');
+  await validateRecipients(pool,userId,body.conversationId,packet);
   const result = await pool.query(`INSERT INTO messages(conversation_id,sender_id,encrypted_content,key_version,client_id) VALUES ($1,$2,$3,1,$4) ON CONFLICT(sender_id,client_id) DO UPDATE SET client_id=messages.client_id RETURNING id,conversation_id,sender_id,encrypted_content,created_at,client_id`, [body.conversationId,userId,packet,body.clientId]);
   const message = result.rows[0]; if (message.conversation_id !== body.conversationId || !same(message.encrypted_content)) throw new ChatError('Gönderim kimliği başka mesajda kullanılmış.');
   message.username = (await pool.query('SELECT username FROM users WHERE id=$1',[userId])).rows[0].username; return message;
 }
+function validatePacket(packet,maxCiphertext) {
+  const exact=(o,keys)=>o && typeof o==='object' && !Array.isArray(o) && Object.keys(o).sort().join(',')===keys;
+  const base64=(s,min,max)=>typeof s==='string' && s.length%4===0 && /^[A-Za-z0-9+/]+={0,2}$/.test(s) && Buffer.from(s,'base64').toString('base64')===s && Buffer.from(s,'base64').length>=min && Buffer.from(s,'base64').length<=max;
+  if (!exact(packet,'ciphertext,envelopes,iv,v') || packet.v!==1 || !base64(packet.iv,12,12) || !base64(packet.ciphertext,17,maxCiphertext) || !Array.isArray(packet.envelopes) || packet.envelopes.length<2 || packet.envelopes.length>100) throw new ChatError('Geçersiz şifreli paket.');
+  for(const e of packet.envelopes) if(!exact(e,'keyVersion,userId,wrapped') || !Number.isSafeInteger(e.keyVersion) || e.keyVersion<1 || !base64(e.wrapped,256,256)) throw new ChatError('Geçersiz anahtar zarfı.'); else id(e.userId);
+}
+async function validateRecipients(pool,userId,conversationId,packet) {
+  const keys=await conversationKeys(pool,userId,conversationId);
+  if(new Set(packet.envelopes.map(e=>e.userId)).size!==keys.length || packet.envelopes.length!==keys.length || keys.some(k=>!k.key_version || !packet.envelopes.some(e=>e.userId===k.user_id && e.keyVersion===k.key_version))) throw new ChatError('Üyelerin anahtarları eksik veya değişti. Anahtarları yeniden doğrulayın.');
+}
+
 function canonical(value) { if(Array.isArray(value)) return value.map(canonical); if(value && typeof value==='object') return Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])); return value; }
 function publicMessage(m) { return Object.fromEntries(['id','conversation_id','sender_id','encrypted_content','created_at','client_id','username'].map(k=>[k,m[k]])); }
 export function chatRoutes(pool) {
@@ -52,5 +60,26 @@ export function chatRoutes(pool) {
  router.get('/conversations', wrap(async(req,res) => res.json({conversations:(await pool.query(`SELECT c.id,c.kind,c.name, (SELECT string_agg(u.username, ', ' ORDER BY u.username) FROM conversation_members cm JOIN users u ON u.id=cm.user_id WHERE cm.conversation_id=c.id) AS members FROM conversations c JOIN conversation_members cm ON cm.conversation_id=c.id WHERE cm.user_id=$1 ORDER BY c.id DESC`,[req.session.userId])).rows})));
  router.post('/conversations',wrap(async(req,res) => res.status(201).json(await createConversation(pool,req.session.userId,req.body))));
  router.get('/conversations/:id/messages',wrap(async(req,res) => res.json(await history(pool,req.session.userId,req.params.id,req.query.before))));
+ const profilePath = '/conversations/:id/writing-profiles/:ownerId';
+ router.get(profilePath,wrap(async(req,res)=>{
+   const {id:conversationId,ownerId}=req.params;
+   await member(pool,conversationId,req.session.userId);
+   const result=await pool.query('SELECT encrypted_profile,updated_at FROM writing_profiles WHERE conversation_id=$1 AND user_id=$2',[conversationId,id(ownerId)]);
+   res.json({profile:result.rows[0] ?? null});
+ }));
+ router.post(profilePath,wrap(async(req,res)=>{
+   const {id:conversationId,ownerId}=req.params;
+   const userId=req.session.userId;
+   await member(pool,conversationId,userId);
+   if(id(ownerId)!==userId) throw new ChatError('Yalnızca kendi yazım profilinizi kaydedebilirsiniz.',403);
+   if(!req.body || Object.keys(req.body).join(',')!=='packet') throw new ChatError('Yalnızca şifreli yazım profili kabul edilir.');
+   const {packet}=req.body;
+   validatePacket(packet,12016);
+   await validateRecipients(pool,userId,conversationId,packet);
+   const result=await pool.query(`INSERT INTO writing_profiles(conversation_id,user_id,encrypted_profile)
+     VALUES ($1,$2,$3) ON CONFLICT(conversation_id,user_id) DO UPDATE
+     SET encrypted_profile=EXCLUDED.encrypted_profile, updated_at=now() RETURNING updated_at`,[conversationId,userId,packet]);
+   res.json(result.rows[0]);
+ }));
  return router;
 }

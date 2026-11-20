@@ -14,11 +14,20 @@ export async function identity() {
 const aad = (conversationId,senderId,clientId) => encoder.encode(JSON.stringify([1,conversationId,senderId,clientId]));
 export async function encryptMessage(content, conversationId, senderId, clientId, recipients) {
   if(typeof content!=='string' || !content.trim() || content.length>1000) throw new Error('Mesaj 1–1000 karakter olmalı.');
+  return encryptContent(content,aad(conversationId,senderId,clientId),recipients);
+}
+const profileAad = (conversationId,userId) => encoder.encode(JSON.stringify(['writing-profile',1,conversationId,userId]));
+export async function encryptProfile(samples, conversationId, userId, recipients) {
+  const content=JSON.stringify(samples);
+  if(encoder.encode(content).length>12000) throw new Error('Örnekler çok uzun. Daha az mesaj seçin.');
+  return encryptContent(content,profileAad(conversationId,userId),recipients);
+}
+async function encryptContent(content,additionalData,recipients) {
   if(recipients.some(r=>!r.public_key || !r.key_version)) throw new Error('Bir üyenin anahtarı eksik. Önce kendi tarayıcısında giriş yapmalı.');
   // Each AES key is used for exactly one encryption. Retries reuse the whole packet.
   const raw=crypto.getRandomValues(new Uint8Array(32));
   const key=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt']);
-  const iv=crypto.getRandomValues(new Uint8Array(12)), additionalData=aad(conversationId,senderId,clientId);
+  const iv=crypto.getRandomValues(new Uint8Array(12));
   try {
     const ciphertext=b64(await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData,tagLength:128},key,encoder.encode(content)));
     const envelopes=await Promise.all(recipients.map(async r=>{
@@ -30,18 +39,26 @@ export async function encryptMessage(content, conversationId, senderId, clientId
 }
 export async function decryptMessage(message, userId, identities) {
   if(!message.encrypted_content) return `Eski açık metin kaydı (E2EE değil): ${message.content ?? '[boş]'}`;
+  const content=await decryptContent(message.encrypted_content,userId,identities,aad(message.conversation_id,message.sender_id,message.client_id),'Mesaj');
+  if(!content.trim() || content.length>1000) throw new Error('Mesaj açılamadı: geçersiz metin.');
+  return content;
+}
+export async function decryptProfile(packet, conversationId, ownerId, userId, identities) {
+  const content=await decryptContent(packet,userId,identities,profileAad(conversationId,ownerId),'Yazım profili');
+  try { return JSON.parse(content); }
+  catch { throw new Error('Yazım profili geçersiz.'); }
+}
+async function decryptContent(p,userId,identities,additionalData,label) {
   try {
-    const p=message.encrypted_content, envelope=p.envelopes.find(e=>e.userId===userId);
+    const envelope=p.envelopes.find(e=>e.userId===userId);
     if(p.v!==1 || !envelope) throw new Error();
     const local=identities.find(k=>k.version===envelope.keyVersion);
     if(!local) throw new Error();
-    const additionalData=aad(message.conversation_id,message.sender_id,message.client_id);
     const raw=await crypto.subtle.decrypt({name:'RSA-OAEP',label:additionalData},local.privateKey,unb64(envelope.wrapped));
-    const key=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['decrypt']);
-    new Uint8Array(raw).fill(0);
+    let key;
+    try { key=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['decrypt']); }
+    finally { new Uint8Array(raw).fill(0); }
     const plaintext=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(p.iv),additionalData,tagLength:128},key,unb64(p.ciphertext));
-    const content=new TextDecoder('utf-8',{fatal:true}).decode(plaintext);
-    if(!content.trim() || content.length>1000) throw new Error();
-    return content;
-  } catch {throw new Error('Mesaj açılamadı: bu tarayıcıda gerekli anahtar yok veya paket doğrulanamadı. Eski tarayıcı profilinizi kullanın.');}
+    return new TextDecoder('utf-8',{fatal:true}).decode(plaintext);
+  } catch {throw new Error(label+' açılamadı: bu tarayıcıda gerekli anahtar yok veya paket doğrulanamadı. Eski tarayıcı profilinizi kullanın.');}
 }
