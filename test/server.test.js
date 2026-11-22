@@ -11,7 +11,9 @@ test('Sunucu HTTP üzerinden ana sayfa, varlıklar ve durum yanıtı sunar', asy
   const page = await fetch(base);
   assert.equal(page.status, 200);
   assert.match(page.headers.get('content-type'), /text\/html/);
-  assert.match(await page.text(), /Giriş ve kayıt/);
+  const html = await page.text();
+  assert.match(html, /<title>Mesajlaşma<\/title>/);
+  assert.match(html, /href="#register"/);
   assert.match(page.headers.get('content-security-policy'), /default-src 'self'/);
   for (const path of ['/app.js', '/styles.css']) {
     const response = await fetch(`${base}${path}`);

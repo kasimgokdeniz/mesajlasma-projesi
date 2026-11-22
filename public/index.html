@@ -3,48 +3,95 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mesajlaşma | Başlangıç</title>
+  <title>Mesajlaşma</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/socket.io/socket.io.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/chat.js" type="module"></script>
 </head>
 <body>
-  <header class="page-header">
-    <div><p class="eyebrow">WEB TABANLI MESAJLAŞMA</p><h1>Birlikte konuşmanın başlangıcı.</h1></div>
-    <span class="badge">Yazar analizi</span>
-  </header>
-  <main>
-    <p class="notice">Yeni mesajlar tarayıcıda şifrelenir. Göndermeden önce üye anahtarlarını güvenilir başka bir kanaldan doğrulayın. Yerel anahtarlar kaybolursa eski şifreli mesajlar açılamaz.</p>
-    <section class="connection" aria-labelledby="connection-title">
-      <div><h2 id="connection-title">Sunucu durumu</h2><p id="connection-status" role="status" aria-live="polite">Yükleniyor: sunucu kontrol ediliyor…</p></div>
-      <button id="retry" type="button">Yeniden kontrol et</button>
-    </section>
-    <p id="error-message" class="error" role="alert" hidden></p>
-    <div class="workspace">
-      <section class="panel" aria-labelledby="account-title">
-        <p class="eyebrow">01 / HESAP</p><h2 id="account-title">Giriş ve kayıt</h2>
-        <p id="account-note" class="muted">Kullanıcı adı 3–32 harf, rakam veya alt çizgi; parola 12–128 karakter olmalı.</p>
-        <form id="account-form" aria-describedby="account-note">
-          <fieldset id="account-fields">
-            <legend>Hesap bilgileri</legend>
-            <label for="username">Kullanıcı adı</label><input id="username" name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9_]{3,32}" placeholder="Kullanıcı adınız">
-            <label for="password">Parola</label><input id="password" name="password" type="password" autocomplete="current-password" required minlength="12" maxlength="128" placeholder="En az 12 karakter">
-            <div class="actions"><button type="submit" name="action" value="login">Giriş yap</button><button type="submit" name="action" value="register" class="secondary">Kayıt ol</button></div>
-          </fieldset>
-        </form><p id="account-status" role="status" aria-live="polite"></p><button id="logout" type="button" hidden>Çıkış yap</button>
-      </section>
-      <section class="panel" aria-labelledby="users-title">
-        <p class="eyebrow">02 / KİŞİLER</p><h2 id="users-title">Kullanıcı listesi</h2>
-        <p class="count" id="user-count">Giriş gerekli</p><ul id="user-list"></ul><button id="refresh-users" type="button" hidden>Listeyi yenile</button>
-        <div class="empty" id="users-empty"><span class="empty-symbol" aria-hidden="true">○</span><h3>Kullanıcı listesi</h3><p>Kullanıcıları görmek için giriş yapın.</p></div>
-        <form id="group-form" hidden><label for="group-name">Grup ad&#305;</label><input id="group-name" maxlength="100" required><div id="group-members"></div><button>Grup olu&#351;tur</button><p class="muted">En az iki ba&#351;ka kullan&#305;c&#305; se&#231;in.</p></form><h3>Sohbetler</h3><button id="refresh-chats" type="button" hidden>Sohbetleri yenile</button><ul id="conversation-list"></ul>
-      </section>
-      <section class="panel chat" aria-labelledby="chat-title">
-        <p class="eyebrow">03 / SOHBET</p><h2 id="chat-title">Sohbet alanı</h2>
-        <p id="chat-state" role="status">Sohbet se&#231;in.</p>
-        <button id="own-key" type="button">Kendi parmak izim</button><button id="verify-keys" type="button">Üye anahtarlarını doğrula</button><button id="reset-key" type="button">Anahtarı yenile</button>
-        <button id="older" type="button" hidden>&#214;nceki mesajlar</button><div id="messages" aria-live="polite"></div><p id="typing" role="status"></p>
+  <svg xmlns="http://www.w3.org/2000/svg" class="icon-library" aria-hidden="true">
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H8l-4 2v-5a7.5 7.5 0 0 1 6.5-12h2a7.5 7.5 0 0 1 7.5 7.5Z"/><path d="M8 10h8M8 14h5"/></symbol>
+    <symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v2m1-15a3 3 0 0 1 0 6m5 9v-2a5 5 0 0 0-4-5"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5"/><path d="m15 15 4.5 4.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 5v5h-5m5 0a8 8 0 1 0 0 5"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3"/></symbol>
+    <symbol id="i-exit" viewBox="0 0 24 24"><path d="M10 4H5v16h5m4-12 4 4-4 4m-5-4h9"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m3 4 18 8-18 8 3-8-3-8Zm3 8h15"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="m12 5-7 7 7 7M5 12h14"/></symbol>
+  </svg>
+  <p id="startup" class="startup" role="status">Oturum kontrol ediliyor…</p>
+  <section id="auth-screen" class="auth-screen" hidden aria-labelledby="account-title">
+    <div class="auth-card">
+      <div class="brand"><span class="brand-icon"><svg><use href="#i-chat"/></svg></span> Mesajlaşma</div>
+      <h1 id="account-title">Giriş yap</h1>
+      <form id="account-form" novalidate>
+        <fieldset id="account-fields">
+          <label for="username">Kullanıcı adı</label>
+          <input id="username" name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9_]{3,32}" aria-describedby="username-error">
+          <p id="username-error" class="field-error" hidden></p>
+          <label for="password">Parola</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required minlength="12" maxlength="128" aria-describedby="password-error">
+          <p id="password-error" class="field-error" hidden></p>
+          <p id="account-status" role="status"></p>
+          <button id="account-submit" type="submit">Giriş yap</button>
+        </fieldset>
+      </form>
+      <p class="muted"><span id="auth-prompt">Hesabınız yok mu?</span> <a id="auth-switch" href="#register">Kayıt ol</a></p>
+    </div>
+  </section>
+  <div class="feedback">
+    <div id="error-banner" class="error" hidden>
+      <p id="error-message" role="alert"></p>
+      <button id="dismiss-error" class="icon-button" type="button" aria-label="Uyarıyı kapat">×</button>
+    </div>
+    <button id="retry" type="button" hidden>Yeniden dene</button>
+  </div>
+  <main id="chat-screen" class="workspace" hidden>
+    <nav class="rail" aria-label="Gezinme">
+      <button id="show-chats" class="icon-button rail-active" type="button" aria-label="Sohbetler" title="Sohbetler"><svg><use href="#i-chat"/></svg></button>
+      <button id="show-people" class="icon-button" type="button" aria-label="Kişiler ve gruplar" title="Kişiler ve gruplar"><svg><use href="#i-people"/></svg></button>
+      <span id="account-avatar" class="avatar account-avatar"></span>
+      <button id="logout" class="icon-button" type="button" aria-label="Çıkış yap" title="Çıkış yap"><svg><use href="#i-exit"/></svg></button>
+    </nav>
+    <aside class="sidebar" aria-labelledby="list-title">
+      <div class="sidebar-header">
+        <div class="brand"><span class="brand-icon"><svg><use href="#i-chat"/></svg></span> Mesajlaşma</div>
+        <div class="section-heading"><h1 id="list-title">Sohbetler</h1><button id="refresh-chats" class="icon-button" type="button" aria-label="Sohbetleri yenile" title="Sohbetleri yenile"><svg><use href="#i-refresh"/></svg></button></div>
+        <label class="search"><svg><use href="#i-search"/></svg><input id="chat-search" type="search" aria-label="Sohbet adına göre ara" placeholder="Sohbetlerde ara"></label>
+      </div>
+      <div class="chat-list-scroll">
+        <p id="list-state" class="list-state" role="status"></p>
+        <ul id="conversation-list"></ul>
+      </div>
+      <p id="connection-status" class="connection-status" role="status">Yükleniyor: sunucu kontrol ediliyor…</p>
+    </aside>
+    <section class="conversation" aria-labelledby="chat-title">
+      <header class="conversation-header">
+        <button id="back-to-chats" class="icon-button" type="button" aria-label="Sohbet listesine dön"><svg><use href="#i-back"/></svg></button>
+        <span id="chat-avatar" class="avatar" hidden></span>
+        <div class="conversation-heading"><h2 id="chat-title">Mesajlaşma</h2><p id="typing" role="status" hidden></p></div>
+        <details id="security-panel" class="security">
+          <summary aria-label="Güvenlik" title="Güvenlik"><svg><use href="#i-lock"/></svg></summary>
+          <div class="security-content">
+            <p class="muted">Yeni mesajlar tarayıcıda şifrelenir. Üye anahtarlarını güvenilir başka bir kanaldan doğrulayın. Yerel anahtarlar kaybolursa eski şifreli mesajlar açılamaz.</p>
+            <button id="own-key" type="button">Kendi parmak izim</button>
+            <button id="verify-keys" type="button">Üye anahtarlarını doğrula</button>
+            <button id="reset-key" type="button">Anahtarı yenile</button>
+          </div>
+        </details>
+      </header>
+      <div id="chat-empty" class="chat-empty">
+        <span class="empty-icon"><svg><use href="#i-chat"/></svg></span>
+        <h2>Sohbet seçin</h2>
+        <p>Mesajları görmek için listeden bir sohbet açın.</p>
+      </div>
+      <div id="chat-body" class="chat-body" hidden>
+        <p id="chat-state" role="status" hidden></p>
+        <div id="message-scroll" class="message-scroll" tabindex="0" aria-label="Mesaj geçmişi">
+          <button id="older" type="button" hidden>Önceki mesajlar</button>
+          <div id="messages"></div>
+        </div>
         <details id="writing-panel" hidden>
           <summary>Yazar analizi</summary>
           <p class="muted">Bir gönderenden 2–8 mesaj ve toplam en az 40 kelime seçin. Sonuç yazım benzerliğini gösterir ve kesin kimlik kanıtı değildir.</p>
@@ -53,10 +100,17 @@
           <button id="writing-action" type="button">Seçimi analiz et</button>
           <p id="writing-status" role="status"></p>
         </details>
-        <form id="message-form"><label for="message">Mesaj</label><textarea id="message" rows="2" maxlength="1000" required disabled></textarea><button id="send" disabled>G&#246;nder</button></form>
-      </section>
-    </div>
+        <form id="message-form"><textarea id="message" aria-label="Mesaj" placeholder="Bir mesaj yazın" rows="2" maxlength="1000" required disabled></textarea><button id="send" disabled aria-label="Gönder" title="Gönder"><svg><use href="#i-send"/></svg></button></form>
+      </div>
+    </section>
+    <dialog id="people-dialog" aria-labelledby="users-title">
+      <div class="section-heading"><h2 id="users-title">Kişiler ve gruplar</h2><form method="dialog"><button class="secondary">Kapat</button></form></div>
+      <p id="people-error" class="error" role="alert" hidden></p>
+      <p id="user-count" class="muted" role="status"></p>
+      <ul id="user-list"></ul><button id="refresh-users" class="secondary" type="button">Listeyi yenile</button>
+      <div id="users-empty" hidden><p>Henüz başka kayıtlı kullanıcı yok.</p></div>
+      <form id="group-form"><h3>Yeni grup</h3><label for="group-name">Grup adı</label><input id="group-name" maxlength="100" required><div id="group-members"></div><p class="muted">En az iki başka kullanıcı seçin.</p><button>Grup oluştur</button></form>
+    </dialog>
   </main>
-  <footer>Proje temeli · HTML, CSS, JavaScript ve Express</footer>
 </body>
 </html>

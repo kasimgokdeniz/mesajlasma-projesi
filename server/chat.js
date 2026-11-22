@@ -57,7 +57,18 @@ export function chatRoutes(pool) {
  router.get('/keys/me',wrap(async(req,res)=>res.json({userId:req.session.userId,key:await ownKey(pool,req.session.userId)})));
  router.post('/keys',wrap(async(req,res)=>res.status(201).json({key:await publishKey(pool,req.session.userId,req.body)})));
  router.get('/conversations/:id/keys',wrap(async(req,res)=>res.json({keys:await conversationKeys(pool,req.session.userId,req.params.id)})));
- router.get('/conversations', wrap(async(req,res) => res.json({conversations:(await pool.query(`SELECT c.id,c.kind,c.name, (SELECT string_agg(u.username, ', ' ORDER BY u.username) FROM conversation_members cm JOIN users u ON u.id=cm.user_id WHERE cm.conversation_id=c.id) AS members FROM conversations c JOIN conversation_members cm ON cm.conversation_id=c.id WHERE cm.user_id=$1 ORDER BY c.id DESC`,[req.session.userId])).rows})));
+ router.get('/conversations', wrap(async (req, res) => {
+   const { rows } = await pool.query(`
+     SELECT c.id, c.kind, c.name,
+       (SELECT string_agg(u.username, ', ' ORDER BY u.username)
+        FROM conversation_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.conversation_id = c.id) AS members,
+       (SELECT m.created_at FROM messages m WHERE m.conversation_id = c.id
+        ORDER BY m.id DESC LIMIT 1) AS last_message_at
+     FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id
+     WHERE cm.user_id = $1 ORDER BY c.id DESC`, [req.session.userId]);
+   res.json({ conversations: rows });
+ }));
  router.post('/conversations',wrap(async(req,res) => res.status(201).json(await createConversation(pool,req.session.userId,req.body))));
  router.get('/conversations/:id/messages',wrap(async(req,res) => res.json(await history(pool,req.session.userId,req.params.id,req.query.before))));
  const profilePath = '/conversations/:id/writing-profiles/:ownerId';
