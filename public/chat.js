@@ -1,5 +1,5 @@
 import { encryptMessage, decryptMessage } from './crypto.js';
-import { setWritingContext, writingChoice } from './writing-panel.js';
+import { setWritingContext, renderWritingMessages } from './writing-panel.js';
 import { Keyring } from './keyring.js';
 
 const chatState = document.querySelector('#chat-state');
@@ -9,7 +9,15 @@ const sendButton = document.querySelector('#send');
 const messagesNode = document.querySelector('#messages');
 const scroller = document.querySelector('#message-scroll');
 const older = document.querySelector('#older');
-const groupForm = document.querySelector('#group-form');
+const writingOlder = document.querySelector('#writing-older');
+const writingHistory = document.querySelector('#writing-history-state');
+const securityStatus = document.querySelector('#security-status');
+const securitySelect = document.querySelector('#security-chat');
+const verifyKeys = document.querySelector('#verify-keys');
+const ownKey = document.querySelector('#own-key');
+const resetKey = document.querySelector('#reset-key');
+const fingerprintOutput = document.querySelector('#fingerprint');
+let writingRoute, securityRoute, securityOperation, securityChat, requestedRoute;
 const chatList = document.querySelector('#conversation-list');
 const chatRefresh = document.querySelector('#refresh-chats');
 const search = document.querySelector('#chat-search');
@@ -33,6 +41,7 @@ function updateComposer() {
 function setChatState(message = '') {
   chatState.textContent = message;
   chatState.hidden = !message;
+  writingHistory.textContent = message;
 }
 
 function showWriters() {
@@ -76,7 +85,7 @@ function renderMessages(scrollMode) {
   const top = scroller.getBoundingClientRect().top;
   const anchor = follow ? null : [...messagesNode.querySelectorAll('article')].find(node => node.getBoundingClientRect().bottom > top);
   const offset = anchor?.getBoundingClientRect().top;
-  older.hidden = !nextBefore;
+  older.hidden = writingOlder.hidden = !nextBefore;
   const nodes = new Map();
   const fragment = document.createDocumentFragment();
   let previousDay;
@@ -107,16 +116,13 @@ function renderMessages(scrollMode) {
     time.dateTime = message.created_at;
     time.textContent = timeFormat.format(date);
     article.append(text, time);
-    const choice = writingChoice(message);
-    if (choice) article.append(choice);
     nodes.set(message.id, article);
     fragment.append(article);
   }
-  const focusedMessage = document.activeElement?.dataset.messageId;
   messagesNode.replaceChildren(fragment);
   if (follow) scroller.scrollTop = scroller.scrollHeight;
   else if (anchor && nodes.has(anchor.dataset.id)) scroller.scrollTop += nodes.get(anchor.dataset.id).getBoundingClientRect().top - offset;
-  if (focusedMessage) nodes.get(focusedMessage)?.querySelector('input')?.focus({ preventScroll: true });
+  renderWritingMessages();
 }
 
 function chatName(chat) {
@@ -148,7 +154,11 @@ function renderChats() {
       time.textContent = date.toDateString() === new Date().toDateString() ? timeFormat.format(date) : date.toLocaleDateString('tr-TR');
       button.append(time);
     }
-    button.onclick = () => { void selectChat(chat); };
+    button.onclick = () => {
+      const hash = `#chats/${chat.id}`;
+      if (location.hash !== hash) location.hash = hash;
+      else if (!joined && !loading && socket?.connected) void joinSelected();
+    };
     li.append(button);
     return li;
   }));
@@ -170,7 +180,10 @@ async function loadChats() {
     if (request === listRequest) listMessage = 'Sohbetler alınamadı. Listeyi yeniden yükleyin.';
     throw err;
   } finally {
-    if (request === listRequest) renderChats();
+    if (request === listRequest) {
+      renderChats();
+      syncRoute();
+    }
   }
 }
 
@@ -179,7 +192,7 @@ async function loadHistory({ before = null, reconnect = false } = {}) {
   const conversationId = selected.id;
   const ring = keyring, readiness = keyReady;
   loading = true;
-  older.disabled = true;
+  older.disabled = writingOlder.disabled = true;
   setChatState('Mesajlar yükleniyor…');
   try {
     let cursor = before;
@@ -202,7 +215,7 @@ async function loadHistory({ before = null, reconnect = false } = {}) {
   } finally {
     if (token === generation) {
       loading = false;
-      older.disabled = false;
+      older.disabled = writingOlder.disabled = false;
       updateComposer();
     }
   }
@@ -211,6 +224,7 @@ async function loadHistory({ before = null, reconnect = false } = {}) {
 async function joinSelected(reconnect = false) {
   const token = ++generation;
   joined = false;
+  loading = true;
   updateComposer();
   setChatState('Mesajlar yükleniyor…');
   try {
@@ -221,7 +235,10 @@ async function joinSelected(reconnect = false) {
   } catch {
     if (token === generation) setChatState('Sohbet yüklenemedi. Sohbeti yeniden seçin.');
   } finally {
-    if (token === generation) updateComposer();
+    if (token === generation) {
+      loading = false;
+      updateComposer();
+    }
   }
 }
 
@@ -233,31 +250,90 @@ function displayChat() {
   document.querySelector('#chat-title').textContent = name;
   avatar.hidden = !selected;
   avatar.textContent = selected ? initials(name) : '';
-  document.querySelector('#verify-keys').disabled = !selected;
-  setWritingContext(selected ? { conversationId: selected.id, ring: keyring, messages: rendered, api } : null, renderMessages);
+  const writingLink = document.querySelector('#show-writing');
+  writingLink.hidden = !selected;
+  writingLink.href = selected ? `#writing/${selected.id}` : '#chats';
 }
 
-async function selectChat(chat) {
-  document.querySelector('#chat-screen').classList.add('show-conversation');
-  people.close();
-  if (chat.id === selected?.id && joined) return;
+function selectChat(chat) {
+  if (chat?.id === selected?.id) return;
   if (selected) emit('typing', { conversationId: selected.id, active: false }).catch(() => {});
+  generation++;
+  joined = loading = historyLoaded = false;
   selected = chat;
-  pending = null;
+  pending = nextBefore = null;
   messageBox.value = '';
   rendered.clear();
   writers.clear();
   showWriters();
-  older.hidden = true;
-  nextBefore = null;
-  historyLoaded = false;
+  setChatState('');
   displayChat();
-  for (const button of chatList.querySelectorAll('button')) {
-    if (button.dataset.chatId === chat.id) button.setAttribute('aria-current', 'true');
-    else button.removeAttribute('aria-current');
-  }
-  await joinSelected();
+  renderChats();
+  renderMessages();
+  updateComposer();
+  if (selected && socket?.connected) void joinSelected();
 }
+
+function updateSecurity(route, chat) {
+  if (securityRoute !== route) {
+    securityRoute = route;
+    securityOperation = null;
+    securityStatus.textContent = '';
+    fingerprintOutput.hidden = true;
+    fingerprintOutput.textContent = '';
+  }
+  securityChat = chat;
+  securitySelect.replaceChildren(new Option('Sohbet seçin', ''), ...chats.map(item => new Option(chatName(item), item.id)));
+  securitySelect.value = chat?.id ?? '';
+  document.querySelector('#security-conversation').textContent = chat
+    ? `${chatName(chat)} sohbetindeki üyelerin parmak izlerini karşılaştırın.`
+    : route.id ? 'Sohbet bilgisi bekleniyor veya bu sohbet erişilebilir değil.' : 'Doğrulamak istediğiniz sohbeti seçin.';
+  verifyKeys.disabled = !chat || Boolean(securityOperation);
+  ownKey.disabled = resetKey.disabled = Boolean(securityOperation);
+}
+
+function syncRoute() {
+  if (!workspaceRoute || !keyring) return;
+  const route = workspaceRoute;
+  const { name, id } = route;
+  const chat = id && chats.find(item => item.id === id);
+  if (name === 'chats') selectChat(chat || null);
+  if (name === 'writing' && chat) selectChat(chat);
+
+  const writingChat = name === 'writing' && chat;
+  const nextWritingRoute = writingChat ? route : null;
+  if (writingRoute !== nextWritingRoute) {
+    writingRoute = nextWritingRoute;
+    setWritingContext(writingChat ? { conversationId: id, ring: keyring, messages: rendered, api } : null);
+  }
+  writingOlder.hidden = !writingChat || !nextBefore;
+  if (name === 'writing') {
+    document.querySelector('#writing-conversation').textContent = writingChat ? chatName(chat) : '';
+    document.querySelector('#writing-back').href = writingChat ? `#chats/${id}` : '#chats';
+    if (!writingChat) writingHistory.textContent = 'Sohbet bilgisi bekleniyor veya bu sohbet erişilebilir değil.';
+    else writingHistory.textContent = chatState.textContent;
+  }
+  if (name === 'chats' && id && !chat) {
+    document.querySelector('#chat-empty h2').textContent = 'Sohbet bekleniyor';
+    document.querySelector('#chat-empty p').textContent = 'Sohbet erişilemiyorsa listeyi yenileyin.';
+  } else {
+    document.querySelector('#chat-empty h2').textContent = 'Sohbet seçin';
+    document.querySelector('#chat-empty p').textContent = 'Mesajları görmek için listeden bir sohbet açın.';
+  }
+  document.querySelector('#show-security').href = selected ? `#security/${selected.id}` : '#security';
+  if (name === 'security') updateSecurity(route, chat);
+  else if (securityRoute) {
+    securityRoute = securityChat = securityOperation = null;
+    securityStatus.textContent = fingerprintOutput.textContent = '';
+    fingerprintOutput.hidden = true;
+  }
+  if (id && !chat && requestedRoute !== route) {
+    requestedRoute = route;
+    void loadChats().catch(() => {});
+  }
+}
+
+window.addEventListener('workspace-route', syncRoute);
 
 window.addEventListener('account-change', event => {
   const ring = event.detail ? new Keyring(event.detail.id, api) : null;
@@ -275,14 +351,24 @@ window.addEventListener('account-change', event => {
   selected = pending = nextBefore = null;
   joined = loading = historyLoaded = false;
   rendered.clear();
+  messagesNode.replaceChildren();
   writers.clear();
   showWriters();
+  setChatState('');
   chats = [];
   search.value = messageBox.value = '';
   listMessage = 'Sohbetler yükleniyor…';
   older.hidden = true;
-  document.querySelector('#chat-screen').classList.remove('show-conversation');
-  document.querySelector('#security-panel').open = false;
+
+  writingRoute = securityRoute = securityOperation = securityChat = requestedRoute = null;
+  setWritingContext(null);
+  writingOlder.hidden = fingerprintOutput.hidden = true;
+  writingHistory.textContent = securityStatus.textContent = fingerprintOutput.textContent = '';
+  document.querySelector('#security-conversation').textContent = '';
+  document.querySelector('#writing-conversation').textContent = '';
+  document.querySelector('#writing-back').href = '#chats';
+  document.querySelector('#show-security').href = '#security';
+  securitySelect.replaceChildren();
   displayChat();
   renderChats();
   updateComposer();
@@ -328,43 +414,13 @@ window.addEventListener('account-change', event => {
   });
 });
 
-async function createChat(body) {
-  const ring = keyring;
-  const { id } = await api('/conversations', body);
-  if (ring !== keyring) return;
-  search.value = '';
-  await loadChats();
-  const chat = chats.find(chat => chat.id === id);
-  if (ring === keyring && chat) await selectChat(chat);
-}
-
-window.addEventListener('open-private', event => {
-  void createChat({ kind: 'private', userId: event.detail.id }).catch(err => showError(err.message));
-});
-groupForm.onsubmit = async event => {
-  event.preventDefault();
-  const button = groupForm.querySelector('button');
-  button.disabled = true;
-  try {
-    await createChat({
-      kind: 'group',
-      name: document.querySelector('#group-name').value,
-      memberIds: [...groupForm.querySelectorAll('input:checked')].map(input => input.value),
-    });
-    groupForm.reset();
-  } catch (err) { showError(err.message); }
-  finally { button.disabled = false; }
-};
 search.oninput = renderChats;
 chatRefresh.onclick = () => {
   if (socket && !socket.connected) socket.connect();
   void loadChats().catch(() => {});
 };
-document.querySelector('#show-chats').onclick = document.querySelector('#back-to-chats').onclick = () => {
-  document.querySelector('#chat-screen').classList.remove('show-conversation');
-  search.focus();
-};
-older.onclick = async () => {
+document.querySelector('#back-to-chats').onclick = () => { location.hash = 'chats'; };
+older.onclick = writingOlder.onclick = async () => {
   if (loading || !nextBefore) return;
   const token = generation;
   try { await loadHistory({ before: nextBefore }); }
@@ -422,33 +478,63 @@ messageForm.onsubmit = async event => {
   }
 };
 
-document.querySelector('#verify-keys').onclick = async () => {
-  const token = generation;
-  try {
-    if (!selected || !keyring) throw new Error('Önce sohbet seçin.');
-    await keyring.recipients(selected.id, true);
-    if (token === generation) {
-      errorBanner.hidden = true;
-      document.querySelector('#security-panel').open = false;
-      setChatState('Üye anahtarları bu tarayıcıda onaylandı.');
-    }
-  } catch (err) { if (token === generation) showError(err.message); }
-};
-document.querySelector('#own-key').onclick = async () => {
-  try {
-    if (!keyring) throw new Error('Önce giriş yapın.');
-    window.alert(`Kendi anahtar parmak iziniz:\n${await keyring.ownFingerprint()}\nBunu diğer üyelerle güvenilir kanaldan karşılaştırın.`);
-  } catch (err) { showError(err.message); }
-};
-document.querySelector('#reset-key').onclick = async () => {
-  try {
-    if (!keyring) throw new Error('Önce giriş yapın.');
-    const ring = keyring;
-    await ring.initialize(true);
-    await ring.initialize();
-    if (keyring === ring) { ready = true; pending = null; updateComposer(); }
-  } catch (err) { showError(err.message); }
+securitySelect.onchange = () => {
+  location.hash = securitySelect.value ? `security/${securitySelect.value}` : 'security';
 };
 
+async function runSecurity(action) {
+  if (!keyring || securityOperation) return;
+  const ring = keyring;
+  const token = securityOperation = {};
+  const isActive = () => securityOperation === token;
+  updateSecurity(securityRoute, securityChat);
+  securityStatus.dataset.tone = '';
+  securityStatus.textContent = 'İşlem sürüyor…';
+  try {
+    const message = await action(ring, isActive);
+    if (isActive()) {
+      securityStatus.textContent = message;
+      securityStatus.dataset.tone = 'success';
+    }
+  } catch (err) {
+    if (isActive()) {
+      securityStatus.textContent = err.message;
+      securityStatus.dataset.tone = 'error';
+    }
+  } finally {
+    if (isActive()) {
+      securityOperation = null;
+      updateSecurity(securityRoute, securityChat);
+    }
+  }
+}
+
+verifyKeys.onclick = () => {
+  const chat = securityChat;
+  if (!chat) return;
+  return runSecurity(async ring => {
+    await ring.recipients(chat.id, true);
+    return 'Üye anahtarları bu tarayıcıda onaylandı.';
+  });
+};
+ownKey.onclick = () => runSecurity(async (ring, isActive) => {
+  const fingerprint = await ring.ownFingerprint();
+  if (isActive()) {
+    fingerprintOutput.textContent = fingerprint;
+    fingerprintOutput.hidden = false;
+  }
+  return 'Parmak iziniz gösteriliyor.';
+});
+resetKey.onclick = () => runSecurity(async (ring, isActive) => {
+  if (isActive()) fingerprintOutput.hidden = true;
+  await ring.initialize(true);
+  await ring.initialize();
+  if (keyring === ring) { ready = true; pending = null; updateComposer(); }
+  return 'Güncel anahtar bu tarayıcıda hazır.';
+});
+
 // Account lookup may have finished before this module and its imports loaded.
-if (currentUser) window.dispatchEvent(new CustomEvent('account-change', { detail: currentUser }));
+if (currentUser) {
+  window.dispatchEvent(new CustomEvent('account-change', { detail: currentUser }));
+  syncRoute();
+}

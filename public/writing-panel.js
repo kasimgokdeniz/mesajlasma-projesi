@@ -1,100 +1,156 @@
 import { encryptProfile, decryptProfile } from './crypto.js';
 import { hasEnoughText, MAX_SAMPLES, MIN_WORDS, verifyAuthor } from './writing-style.js';
 
-const panel = document.querySelector('#writing-panel');
+const controls = document.querySelector('#writing-controls');
 const mode = document.querySelector('#writing-mode');
 const button = document.querySelector('#writing-action');
 const status = document.querySelector('#writing-status');
+const profileStatus = document.querySelector('#writing-profile');
+const selectionStatus = document.querySelector('#writing-selection');
+const instructions = document.querySelector('#writing-instructions');
+const messageList = document.querySelector('#writing-messages');
+const dateTime = new Intl.DateTimeFormat('tr-TR', { dateStyle: 'medium', timeStyle: 'short' });
 const selection = new Set();
-let context, redraw, operation = null;
+let context, operation, profileRevision = 0;
+
+function report(message, tone = '') {
+  status.textContent = message;
+  status.dataset.tone = tone;
+}
+
+function reportSelection() {
+  selectionStatus.textContent = `${selection.size} / ${MAX_SAMPLES} mesaj seçildi.`;
+}
 
 function resetSelection() {
   operation = null;
   selection.clear();
+  const save = mode.value === 'profile';
   button.disabled = false;
-  button.textContent = mode.value === 'profile' ? 'Profili oluştur veya güncelle' : 'Seçimi analiz et';
-  status.textContent = '';
-  redraw();
+  mode.disabled = false;
+  button.textContent = save ? 'Profili kaydet' : 'Seçimi analiz et';
+  instructions.textContent = save
+    ? 'Size ait, yazarı bilinen mesajları örnek olarak seçin.'
+    : 'Profil örneklerinden sonra yazılmış mesajları tek bir gönderenden seçin.';
+  instructions.textContent += ` En az iki mesaj ve toplam ${MIN_WORDS} kelime gerekli.`;
+  report('');
+  reportSelection();
+  renderWritingMessages();
 }
 
-export function setWritingContext(value, render) {
+export function setWritingContext(value) {
   context = value;
-  redraw = render;
-  panel.hidden = !value;
-  panel.open = false;
+  controls.hidden = !context;
   mode.value = 'analysis';
+  profileStatus.textContent = '';
   resetSelection();
+  if (!context) return;
+  const active = context;
+  const revision = profileRevision;
+  profileStatus.textContent = 'Profil durumu yükleniyor…';
+  active.api(`/conversations/${active.conversationId}/writing-profiles/${active.ring.userId}`).then(({ profile }) => {
+    if (context === active && revision === profileRevision) showProfile(profile);
+  }).catch(() => {
+    if (context === active && revision === profileRevision) profileStatus.textContent = 'Profil durumu alınamadı.';
+  });
 }
 
-export function writingChoice(message) {
-  if (!context || !panel.open || !message.encrypted_content) return null;
-  if (!message.decrypted) {
-    const note = document.createElement('small');
-    note.textContent = 'Analiz için mesajın anahtarı gerekir.';
-    return note;
+function showProfile(profile) {
+  profileStatus.textContent = profile
+    ? `Bu sohbette yazım profiliniz var${profile.updated_at ? ` · ${dateTime.format(new Date(profile.updated_at))}` : ''}.`
+    : 'Bu sohbette henüz yazım profiliniz yok.';
+}
+
+export function renderWritingMessages() {
+  if (!context) {
+    messageList.replaceChildren();
+    return;
   }
-  if (mode.value === 'profile' && message.sender_id !== context.ring.userId) return null;
-  const label = document.createElement('label');
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.dataset.messageId = message.id;
-  box.checked = selection.has(message.id);
-  box.onchange = () => {
-    if (box.checked && selection.size >= MAX_SAMPLES) {
-      box.checked = false;
-      status.textContent = 'En fazla 8 mesaj seçebilirsiniz.';
-      return;
-    }
-    if (box.checked) selection.add(message.id);
-    else selection.delete(message.id);
-    status.textContent = `${selection.size} mesaj seçildi.`;
-  };
-  label.append(box, document.createTextNode('Yazım analizi için seç'));
-  return label;
+  const save = mode.value === 'profile';
+  const all = [...context.messages.values()].filter(message => message.encrypted_content && (!save || message.sender_id === context.ring.userId));
+  const ordered = all.sort((a, b) => BigInt(a.id) < BigInt(b.id) ? -1 : 1);
+  const focused = document.activeElement?.dataset.messageId;
+  messageList.replaceChildren(...ordered.map(message => {
+    const entry = document.createElement('label');
+    const box = document.createElement('input');
+    const heading = document.createElement('strong');
+    const content = document.createElement('span');
+    entry.className = 'writing-message';
+    heading.textContent = `${message.username} · ${dateTime.format(new Date(message.created_at))}`;
+    content.textContent = message.decrypted ? message.content : 'Analiz için bu mesajın yerel anahtarı gerekir.';
+    box.type = 'checkbox';
+    box.dataset.messageId = message.id;
+    box.disabled = !message.decrypted || Boolean(operation);
+    box.checked = selection.has(message.id);
+    box.onchange = () => {
+      if (box.checked && selection.size >= MAX_SAMPLES) {
+        box.checked = false;
+        report(`En fazla ${MAX_SAMPLES} mesaj seçebilirsiniz.`, 'error');
+        return;
+      }
+      if (box.checked) selection.add(message.id);
+      else selection.delete(message.id);
+      report('');
+      reportSelection();
+    };
+    const text = document.createElement('span');
+    text.append(heading, content);
+    entry.append(box, text);
+    return entry;
+  }));
+  if (!ordered.length) messageList.textContent = 'Seçilebilecek mesaj yok.';
+  if (focused) messageList.querySelector(`[data-message-id="${focused}"]`)?.focus({ preventScroll: true });
 }
 
 mode.onchange = resetSelection;
-panel.ontoggle = () => { if (redraw) redraw(); };
-
 button.onclick = async () => {
   if (!context || operation) return;
-  const token = {};
-  operation = token;
+  const token = operation = {};
   const { messages, ring, conversationId, api } = context;
   const save = mode.value === 'profile';
   const selected = [...selection].map(id => messages.get(id)).filter(m => m?.decrypted && m.encrypted_content);
   const samples = selected.map(m => ({ id: m.id, text: m.content }));
   const owner = selected[0]?.sender_id;
-  const report = message => { if (operation === token) status.textContent = message; };
-  button.disabled = true;
+  const show = (message, tone) => { if (operation === token) report(message, tone); };
+  button.disabled = mode.disabled = true;
   try {
-    if (!samples.length) return report('Örnek yok. Açılmış mesajları seçin.');
+    if (!samples.length) return show('Örnek yok. Açılmış mesajları seçin.', 'error');
     if (selected.some(m => m.sender_id !== owner) || (save && owner !== ring.userId)) {
-      return report(save ? 'Yalnızca kendi mesajlarınızı seçin.' : 'Tek bir gönderenin mesajlarını seçin.');
+      return show(save ? 'Yalnızca kendi mesajlarınızı seçin.' : 'Tek bir gönderenin mesajlarını seçin.', 'error');
     }
-    if (!hasEnoughText(samples)) return report(`Yetersiz metin. En az iki mesaj ve toplam ${MIN_WORDS} kelime seçin.`);
-    report('Yükleniyor…');
+    if (!hasEnoughText(samples)) return show(`Yetersiz metin. En az iki mesaj ve toplam ${MIN_WORDS} kelime seçin.`, 'error');
+    show('İşlem sürüyor…');
+    renderWritingMessages();
     const path = `/conversations/${conversationId}/writing-profiles/${owner}`;
     if (save) {
       const recipients = await ring.recipients(conversationId);
       if (operation !== token) return;
       const packet = await encryptProfile(samples, conversationId, owner, recipients);
       if (operation !== token) return;
-      await api(path, { packet });
-      report('Yazım profili kaydedildi.');
+      const profile = await api(path, { packet });
+      if (operation === token) {
+        profileRevision++;
+        showProfile(profile);
+      }
+      show('Yazım profili kaydedildi.', 'success');
     } else {
       const { profile } = await api(path);
-      if (!profile) return report('Örnek yok. Gönderen bu sohbet için henüz profil oluşturmadı.');
+      if (!profile) return show('Örnek yok. Gönderen bu sohbet için henüz profil oluşturmadı.', 'error');
       const examples = await decryptProfile(profile.encrypted_profile, conversationId, owner, ring.userId, await ring.keys());
       const { status: result } = verifyAuthor(examples, samples);
-      report({ match: 'Uyum', difference: 'Farklılık', insufficient: 'Yetersiz metin' }[result]);
+      show({
+        match: 'Uyum. İletilerin yazımı örnek profile benziyor.',
+        difference: 'Farklılık. İletilerin yazımı örnek profilden farklı.',
+        insufficient: 'Yetersiz metin. Değerlendirme için daha fazla metin seçin.',
+      }[result], result === 'match' ? 'success' : '');
     }
   } catch (error) {
-    report(`İşlem tamamlanamadı. ${error.message}`);
+    show(`İşlem tamamlanamadı. ${error.message}`, 'error');
   } finally {
     if (operation === token) {
       operation = null;
-      button.disabled = false;
+      button.disabled = mode.disabled = false;
+      renderWritingMessages();
     }
   }
 };

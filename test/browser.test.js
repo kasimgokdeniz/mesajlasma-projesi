@@ -26,7 +26,7 @@ class CDP {
 
 test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar kaybı', {timeout:90000},async t=>{
   const executable=await chromePath();if(!executable){t.skip('Chrome/Edge bulunamadı; CHROME_PATH ayarlayın.');return;}
-  const pool=createPool({test:true}),users=[],conversations=[],frames=[],browserErrors=[];
+  const pool=createPool({test:true}),users=[],loginForms=[],conversations=[],frames=[],browserErrors=[];
   const {server,io}=createChatServer({pool,secret:randomBytes(48).toString('hex')});
   const profile=await mkdtemp(join(tmpdir(),'messaging-browser-'));
   let chrome,cdp;
@@ -73,6 +73,7 @@ test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar 
       assert.equal(await cdp.evaluate(sessionId,`document.querySelectorAll('[aria-invalid="true"]').length`),2);
     }
     const credentials = `document.querySelector('#account-form').elements.username.value=${JSON.stringify(username)};document.querySelector('#account-form').elements.password.value=${JSON.stringify(password)};document.querySelector('#account-form').requestSubmit();true`;
+    loginForms.push(credentials);
     await cdp.evaluate(sessionId,credentials);
     const user=await until(()=>cdp.evaluate(sessionId,`currentUser && ({id:currentUser.id,username:currentUser.username})`));users.push(user);
     await until(()=>cdp.evaluate(sessionId,`fetch('/api/keys/me').then(r=>r.json()).then(d=>!!d.key)`));
@@ -81,30 +82,65 @@ test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar 
       assert.equal(await cdp.evaluate(sessionId,`location.hash`),'#chats');
       await cdp.evaluate(sessionId,`document.querySelector('#logout').click();true`);
       await until(()=>cdp.evaluate(sessionId,`location.hash==='#login' && document.querySelector('#chat-screen').hidden`));
+      await cdp.evaluate(sessionId,credentials.replace(JSON.stringify(password),JSON.stringify('wrong-password')));
+      await until(()=>cdp.evaluate(sessionId,`document.querySelector('#account-status').textContent.includes('hatalı')`));
       await cdp.evaluate(sessionId,credentials);
       await until(()=>cdp.evaluate(sessionId,`location.hash==='#chats' && document.querySelector('#connection-status').textContent==='Anlık bağlantı açık.'`));
     }
   }
   const [a,b,c,d]=pages;
   const ev=(page,expression)=>cdp.evaluate(page,expression);
-  const create=async(body)=>{const r=await ev(a,`api('/conversations',${JSON.stringify(body)})`);conversations.push(r.id);return r.id;};
+  const navigate=async(page,hash,selector)=>{
+    await ev(page,`location.hash=${JSON.stringify(hash)};true`);
+    await until(()=>ev(page,`location.hash===${JSON.stringify('#'+hash)} && !document.querySelector(${JSON.stringify(selector)}).hidden`));
+  };
+  const created=async()=>{
+    const id=await until(()=>ev(a,`/^#chats\\/([0-9]+)$/.exec(location.hash)?.[1]`));
+    conversations.push(id);
+    return id;
+  };
   const open=async(page,id)=>{
     await ev(page,`document.querySelector('#refresh-chats').click();true`);
     const selector=JSON.stringify(`#conversation-list button[data-chat-id="${id}"]`);
     await until(()=>ev(page,`!!document.querySelector(${selector})`));
     await ev(page,`document.querySelector(${selector}).click();true`);
-    await until(()=>ev(page,`document.querySelector('#chat-state').textContent!=='Mesajlar yükleniyor…' && !document.querySelector('#message').disabled`));
+    await until(()=>ev(page,`location.hash==='#chats/${id}' && !document.querySelector('.conversation').hidden && !document.querySelector('#message').disabled`));
   };
   const verify=async(page,id)=>{
     // Test simulates the external comparison against each member's locally generated public key.
     const directory=await ev(page,`api('/conversations/${id}/keys')`);
     for(const key of directory.keys){const index=users.findIndex(u=>u.id===key.user_id);assert.ok(index>=0);assert.deepEqual(await ev(pages[index],`import('/keyring.js').then(async({Keyring})=>(await new Keyring(currentUser.id,api).keys()).at(-1).publicKey)`),key.public_key);}
+    await navigate(page,`security/${id}`,'#security-screen');
+    await until(()=>ev(page,`!document.querySelector('#verify-keys').disabled`));
     await ev(page,`document.querySelector('#verify-keys').click();true`);
-    await until(()=>ev(page,`document.querySelector('#chat-state').textContent==='Üye anahtarları bu tarayıcıda onaylandı.'`));
+    await until(()=>ev(page,`document.querySelector('#security-status').textContent==='Üye anahtarları bu tarayıcıda onaylandı.'`));
+    await open(page,id);
   };
   const send=async(page,text)=>{await ev(page,`document.querySelector('#message').value=${JSON.stringify(text)};document.querySelector('#message-form').requestSubmit();true`);};
   const contains=(page,text)=>until(()=>ev(page,`[...document.querySelectorAll('#messages p')].some(p=>p.textContent===${JSON.stringify(text)})`));
-  const privateId=await create({kind:'private',userId:users[1].id});await open(a,privateId);await open(b,privateId);
+  await navigate(a,'settings','#settings-screen');
+  assert.equal(await ev(a,`document.querySelector('#settings-username').textContent`),users[0].username);
+  await ev(a,`document.querySelector('#show-security').click();true`);
+  await until(()=>ev(a,`!document.querySelector('#security-screen').hidden`));
+  await ev(a,`document.querySelector('#own-key').click();true`);
+  await until(()=>ev(a,`!document.querySelector('#fingerprint').hidden && document.querySelector('#fingerprint').textContent.length>32`));
+  await ev(a,'history.back();true');
+  await until(()=>ev(a,`!document.querySelector('#settings-screen').hidden`));
+  await ev(a,'history.forward();true');
+  await until(()=>ev(a,`!document.querySelector('#security-screen').hidden`));
+  await navigate(a,'new-chat','#new-chat-screen');
+  await cdp.call('Page.reload',{},a);
+  const person=JSON.stringify(`#user-list button[data-user-id="${users[1].id}"]`);
+  await until(()=>ev(a,`!document.querySelector('#new-chat-screen').hidden && !!document.querySelector(${person})`));
+  await ev(a,`const search=document.querySelector('#user-search');search.value=${JSON.stringify(users[1].username)};search.dispatchEvent(new Event('input'));true`);
+  assert.equal(await ev(a,`document.querySelectorAll('#user-list button').length`),1);
+  await ev(a,`document.querySelector(${person}).click();true`);
+  const privateId=await created();await open(a,privateId);await open(b,privateId);
+  await navigate(b,'new-chat','#new-chat-screen');
+  const firstUser=JSON.stringify(`#user-list button[data-user-id="${users[0].id}"]`);
+  await until(()=>ev(b,`!!document.querySelector(${firstUser})`));
+  await ev(b,`document.querySelector(${firstUser}).click();true`);
+  await until(()=>ev(b,`location.hash==='#chats/${privateId}' && !document.querySelector('#message').disabled`));
   await send(a,'unverified');await until(()=>ev(a,`document.querySelector('#error-message').textContent.includes('doğrula')`));
   assert.equal((await pool.query('SELECT 1 FROM messages WHERE conversation_id=$1',[privateId])).rowCount,0);
   await verify(a,privateId);await verify(b,privateId);
@@ -112,6 +148,7 @@ test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar 
   const replyText='reply-'+randomBytes(16).toString('hex');
   await ev(b,`document.querySelector('#message').focus();true`);
   await cdp.call('Input.insertText',{text:replyText},b);
+  await until(()=>ev(a,`document.querySelector('#typing').textContent.includes('yazıyor')`));
   const enter={key:'Enter',code:'Enter',windowsVirtualKeyCode:13};
   await cdp.call('Input.dispatchKeyEvent',{type:'keyDown',modifiers:8,text:'\r',...enter},b);
   await cdp.call('Input.dispatchKeyEvent',{type:'keyUp',modifiers:8,...enter},b);
@@ -119,6 +156,7 @@ test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar 
   await cdp.call('Input.dispatchKeyEvent',{type:'keyDown',text:'\r',...enter},b);
   await cdp.call('Input.dispatchKeyEvent',{type:'keyUp',...enter},b);
   await contains(a,replyText+'\n');
+  await until(()=>ev(a,`document.querySelector('#typing').hidden`));
   for (const [width, height] of [[1366, 768], [1920, 1080]]) {
     await cdp.call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},a);
     assert.equal(await ev(a,`(() => {
@@ -144,20 +182,28 @@ test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar 
     'yarın sabah erken gelirim, toplantıdan önce kahve alırım. kalan dosyaları yanımda getiriyorum. bir şey eksik olursa bana yaz, birlikte hallederiz.',
   ];
   const choose=(page, texts)=>ev(page, `for (const text of ${JSON.stringify(texts)}) {
-    [...document.querySelectorAll('#messages article')].find(article=>article.querySelector('p').textContent===text)
+    [...document.querySelectorAll('#writing-messages label')].find(entry=>entry.querySelector('span span').textContent===text)
       .querySelector('input').click();
   } true`);
   const writingStatus=(page,text)=>until(()=>ev(page,`document.querySelector('#writing-status').textContent.startsWith(${JSON.stringify(text)})`));
   const runWriting=page=>ev(page,"document.querySelector('#writing-action').click();true");
-  await ev(a, "document.querySelector('#writing-panel').open=true;const mode=document.querySelector('#writing-mode');mode.value='profile';mode.dispatchEvent(new Event('change'));true");
-  await runWriting(a);await writingStatus(a,'Örnek yok');
   for(const text of examples){await send(a,text);await contains(a,text);await contains(b,text);}
+  await ev(a,"document.querySelector('#show-writing').click();true");
+  await until(()=>ev(a,"!document.querySelector('#writing-controls').hidden"));
+  await ev(a, "const mode=document.querySelector('#writing-mode');mode.value='profile';mode.dispatchEvent(new Event('change'));true");
+  await runWriting(a);await writingStatus(a,'Örnek yok');
   await choose(a,examples);await runWriting(a);await writingStatus(a,'Yazım profili kaydedildi.');
   const profilePath='/conversations/'+privateId+'/writing-profiles/'+users[0].id;
+  const firstProfile=await ev(a,'api('+JSON.stringify(profilePath)+')');
+  await runWriting(a);await writingStatus(a,'Yazım profili kaydedildi.');
   const savedProfile=await ev(b,'api('+JSON.stringify(profilePath)+')');
+  assert.notDeepEqual(savedProfile.profile.encrypted_profile,firstProfile.profile.encrypted_profile);
+  await cdp.call('Page.reload',{},a);
+  await until(()=>ev(a,`location.hash==='#writing/${privateId}' && document.querySelector('#writing-profile').textContent.includes('profiliniz var') && !!document.querySelector('#writing-messages input:not(:disabled)')`));
+  await open(a,privateId);
   for(const text of examples)assert.ok(!JSON.stringify(savedProfile).includes(text));
-  await ev(b,"document.querySelector('#writing-panel').open=true;true");
-  await until(()=>ev(b,"!!document.querySelector('#messages input')"));
+  await ev(b,"document.querySelector('#show-writing').click();true");
+  await until(()=>ev(b,"!!document.querySelector('#writing-messages input')"));
   await choose(b,[privateText]);await runWriting(b);await writingStatus(b,'Yetersiz metin');
   await choose(b,[privateText]);
   await choose(b,examples);await runWriting(b);await writingStatus(b,'İşlem tamamlanamadı. Örneklerden sonra');
@@ -165,7 +211,15 @@ test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar 
   for(const text of candidates){await send(a,text);await contains(a,text);await contains(b,text);}
   await choose(b,candidates);await runWriting(b);await writingStatus(b,'Uyum');
   assert.deepEqual(await ev(b,'api('+JSON.stringify(profilePath)+')'),savedProfile);
-  const groupId=await create({kind:'group',name:'Browser group',memberIds:[users[1].id,users[2].id]});
+  await navigate(a,'new-group','#new-group-screen');
+  const groupSelectors=[users[1].id,users[2].id].map(id=>`#group-members input[value="${id}"]`);
+  await until(()=>ev(a,`!!document.querySelector(${JSON.stringify(groupSelectors[0])})`));
+  await ev(a,`document.querySelector('#group-form').requestSubmit();true`);
+  assert.equal(await ev(a,`!document.querySelector('#group-name-error').hidden && !document.querySelector('#group-members-error').hidden`),true);
+  await ev(a,`const name=document.querySelector('#group-name');name.value='Browser group';name.dispatchEvent(new Event('input'));for(const selector of ${JSON.stringify(groupSelectors)})document.querySelector(selector).click();true`);
+  assert.equal(await ev(a,`document.querySelectorAll('#selected-members li').length`),2);
+  await ev(a,`document.querySelector('#group-form').requestSubmit();true`);
+  const groupId=await created();
   for(const page of [a,b,c]){await open(page,groupId);await verify(page,groupId);}
   const groupTexts=[];
   for(const page of [a,b,c]){const text='group-'+randomBytes(16).toString('hex');groupTexts.push(text);await send(page,text);for(const reader of [a,b,c])await contains(reader,text);}
@@ -181,6 +235,7 @@ test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar 
   // Delete only this test account's local record, simulating browser storage loss.
   await ev(c,`new Promise((resolve,reject)=>{const r=indexedDB.open('messaging-e2ee-v1',1);r.onsuccess=()=>{const tx=r.result.transaction('accounts','readwrite');tx.objectStore('accounts').delete(currentUser.id);tx.oncomplete=()=>{r.result.close();resolve(true);};tx.onerror=reject;};})`);
   await cdp.call('Page.reload',{},c);await until(()=>ev(c,`document.querySelector('#error-message').textContent.includes('yerel anahtarı bulunamadı')`));assert.equal(await ev(c,`document.querySelector('#send').disabled`),true);
+  await navigate(c,`security/${groupId}`,'#security-screen');
   await ev(c,`document.querySelector('#reset-key').click();true`);
   await until(()=>ev(c,`fetch('/api/keys/me').then(r=>r.json()).then(d=>d.key?.key_version===2)`));await open(c,groupId);
   await until(()=>ev(c,`document.querySelector('#messages').textContent.includes('Mesaj açılamadı')`));
@@ -202,5 +257,14 @@ test('Chrome: özel/grup sohbeti, yazar analizi, IndexedDB geçmişi ve anahtar 
   })()`);
   await until(()=>ev(a,`document.querySelector('#older').hidden && document.querySelectorAll('#messages article').length>55`));
   assert.equal(await ev(a,`document.querySelector('[data-id="${anchor.id}"]').getBoundingClientRect().top`),anchor.top);
+  await ev(a,`document.querySelector('#logout').click();true`);
+  await until(()=>ev(a,`location.hash==='#login' && document.querySelector('#chat-screen').hidden`));
+  await ev(a,`location.hash='writing/${privateId}';true`);
+  await until(()=>ev(a,`location.hash==='#login' && document.querySelector('#chat-screen').hidden`));
+  await ev(a,loginForms[3]);
+  await until(()=>ev(a,`location.hash==='#chats' && document.querySelector('#connection-status').textContent==='Anlık bağlantı açık.'`));
+  await navigate(a,'settings','#settings-screen');
+  assert.equal(await ev(a,`document.querySelector('#settings-username').textContent`),users[3].username);
+  assert.equal(await ev(a,`document.querySelector('#messages').childElementCount + document.querySelector('#writing-messages').childElementCount`),0);
   assert.deepEqual(browserErrors,[]);
 });
